@@ -43,7 +43,9 @@ else
   fi
 fi
 
-echo "==> [Deploy] Deploying edge-gateway to Cloudflare Workers..."
-npx wrangler deploy
+echo "==> [Deploy] Deploying edge-gateway API boundary Workers..."
+npx wrangler deploy --config wrangler.auth.toml --env uat
+npx wrangler deploy --config wrangler.admin.toml --env uat
+npx wrangler deploy --config wrangler.core.toml --env uat
 
 echo "==> [Success] Edge Gateway deployment completed successfully."

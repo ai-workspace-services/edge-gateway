@@ -1,0 +1,16 @@
+name = "frontend-api-core"
+main = "src/workers/core.ts"
+compatibility_date = "2026-08-17"
+compatibility_flags = ["nodejs_compat"]
+
+[env.uat]
+name = "frontend-api-core-uat"
+routes = [
+  { pattern = "console-uat.onwalk.net/api/*", zone_name = "onwalk.net" }
+]
+
+[env.uat.vars]
+PRIMARY_UPSTREAM = "https://vps-api.svc.plus"
+FALLBACK_UPSTREAM = "https://accounts-service-uc.a.run.app"
+JWT_ISSUER = "https://accounts.svc.plus"
+TIMEOUT_MS = "2500"
