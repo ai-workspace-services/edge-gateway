@@ -3,6 +3,8 @@
 > **Cloudflare Worker 智能边缘网关与流量调度器**  
 > 统一域名接入 · 边缘 JWT 验签 · GTM 实时故障转移 · CORS 跨域秒回 · 统一密钥拉取自 `vault.svc.plus`
 
+Edge Gateway 是一个超轻量级的专属应用网关：核心 handler 基于标准 Fetch API 和 Web Crypto，可运行在 Cloudflare Worker，也可嵌入 Node.js 20+ 或 Deno 1.37+；每个 Worker 可执行 bundle 严格小于 `3 MiB`。完整的架构、运行时兼容性、Git-backed CMS、环境变量和部署说明见 [`docs/edge-gateway.md`](docs/edge-gateway.md)。
+
 ---
 
 ## 📌 项目架构 (Architecture)
@@ -95,9 +97,9 @@ npm run typecheck
 `ai-workspace-infra/gitops` 渲染的环境配置；运行模式由 `spec.runtime.mode` 注入，支持
 `selfhost`、`serverless` 和 `hybrid`。UAT 的三个 canonical 声明分别位于：
 
-* `resources/svc.plus/uat/cloudflare/selfhost/edge-routing.yaml`
-* `resources/svc.plus/uat/cloudflare/serverless/edge-routing.yaml`
-* `resources/svc.plus/uat/cloudflare/hybrid/edge-routing.yaml`
+* `resources/svc.plus/uat/selfhost/edge-routing.yaml`
+* `resources/svc.plus/uat/serverless/edge-routing.yaml`
+* `resources/svc.plus/uat/hybrid/edge-routing.yaml`
 
 `selfhost` 由 DNS 直接指向 VPS Full Stack，因此不部署 edge-gateway Worker；只有
 `serverless` 与 `hybrid` 部署三个 API boundary Workers。每次部署只能消费与
