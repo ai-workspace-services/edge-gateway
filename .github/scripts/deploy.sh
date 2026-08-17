@@ -10,6 +10,25 @@ VAULT_ADDR="${VAULT_ADDR:-https://vault.svc.plus}"
 VAULT_SECRETS_PATH="${VAULT_SECRETS_PATH:-secret/data/edge-gateway}"
 CONFIG_FILE="${EDGE_GATEWAY_CONFIG_FILE:?EDGE_GATEWAY_CONFIG_FILE must point to the rendered GitOps routing manifest}"
 
+command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
+test -f "${CONFIG_FILE}" || { echo "edge-gateway config not found: ${CONFIG_FILE}" >&2; exit 2; }
+
+RUNTIME_MODE="$(jq -er '.spec.runtime.mode' "${CONFIG_FILE}")"
+jq -e --arg mode "${RUNTIME_MODE}" \
+  '.kind == "EdgeRoutingConfig" and .metadata.mode == $mode and ($mode == "selfhost" or $mode == "serverless" or $mode == "hybrid")' \
+  "${CONFIG_FILE}" >/dev/null || {
+  echo "GitOps routing manifest must be a valid mode-specific EdgeRoutingConfig" >&2
+  exit 2
+}
+
+# Selfhost DNS points directly at the VPS Full Stack. There is deliberately no
+# edge-gateway Worker in this mode, so no Vault or Cloudflare credentials are
+# needed for this repository's deployment job.
+if [[ "${RUNTIME_MODE}" == "selfhost" ]]; then
+  echo "==> [Deploy] Selfhost mode selected; edge-gateway deployment is not required."
+  exit 0
+fi
+
 echo "==> [Vault] Fetching secrets from ${VAULT_ADDR} (${VAULT_SECRETS_PATH})..."
 
 if [[ -z "${VAULT_TOKEN:-}" ]]; then
@@ -41,15 +60,19 @@ else
 fi
 
 echo "==> [Deploy] Deploying edge-gateway API boundary Workers..."
-jq -e '.kind == "EdgeRoutingConfig" and (.spec.runtime.mode == "serverless" or .spec.runtime.mode == "hybrid")' "${CONFIG_FILE}" >/dev/null || {
-  echo "GitOps routing manifest must be an active serverless or hybrid EdgeRoutingConfig" >&2
-  exit 2
-}
+CONTENT_SERVICE_TOKEN=""
+if [[ -n "${VAULT_RESPONSE}" ]]; then
+  CONTENT_SERVICE_TOKEN=$(echo "${VAULT_RESPONSE}" | jq -r '.data.data.CONTENT_SERVICE_TOKEN // .data.data.INTERNAL_SERVICE_TOKEN // .data.CONTENT_SERVICE_TOKEN // .data.INTERNAL_SERVICE_TOKEN // empty')
+fi
 for boundary in auth admin core; do
   worker_name="$(jq -er --arg boundary "${boundary}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
   if [[ -n "${JWT_SECRET:-}" ]]; then
     echo "==> [Wrangler] Updating JWT_SECRET for ${boundary} Worker..."
     printf '%s' "${JWT_SECRET}" | npx wrangler secret put JWT_SECRET --name "${worker_name}"
+  fi
+  if [[ "${boundary}" == "core" && -n "${CONTENT_SERVICE_TOKEN}" ]]; then
+    echo "==> [Wrangler] Updating CONTENT_SERVICE_TOKEN for core Worker..."
+    printf '%s' "${CONTENT_SERVICE_TOKEN}" | npx wrangler secret put CONTENT_SERVICE_TOKEN --name "${worker_name}"
   fi
   bash .github/scripts/deploy_boundary.sh "${boundary}"
 done

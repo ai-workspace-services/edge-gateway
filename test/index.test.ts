@@ -28,6 +28,8 @@ describe('runtime mode routing', () => {
   const baseEnv = {
     PRIMARY_UPSTREAM: 'https://vps.example.test',
     FALLBACK_UPSTREAM: 'https://cloud-run.example.test',
+    CONTENT_UPSTREAM: 'https://content-service.example.test',
+    BILLING_UPSTREAM: 'https://billing-service.example.test',
     TIMEOUT_MS: '2500',
   };
   type FetchArgs = [input: Request | string | URL, init?: RequestInit];
@@ -67,5 +69,66 @@ describe('runtime mode routing', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[0][0])).toContain('vps.example.test');
     expect(String(fetchMock.mock.calls[1][0])).toContain('cloud-run.example.test');
+  });
+
+  it('routes public Git-backed CMS reads to content-service with its service token', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async (_input, init) => {
+      expect(new Headers(init?.headers).get('X-Service-Token')).toBe('content-token');
+      return new Response('content', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://accounts.example.test/api/v1/products/xconnect'),
+      { ...baseEnv, RUNTIME_MODE: 'serverless', CONTENT_SERVICE_TOKEN: 'content-token' },
+    );
+
+    expect(response.headers.get('X-Upstream-Route')).toBe('cloud-run-serverless');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('content-service.example.test');
+  });
+
+  it('routes billing APIs to billing-service in serverless mode', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('billing', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://accounts.example.test/api/v1/billing/plans'),
+      { ...baseEnv, RUNTIME_MODE: 'serverless' },
+    );
+
+    expect(response.headers.get('X-Upstream-Route')).toBe('cloud-run-serverless');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('billing-service.example.test');
+  });
+
+  it('uses content-service as the hybrid fallback for CMS reads', async () => {
+    const fetchMock = vi
+      .fn<FetchArgs, Promise<Response>>()
+      .mockResolvedValueOnce(new Response('selfhost unavailable', { status: 503 }))
+      .mockResolvedValueOnce(new Response('content fallback', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://accounts.example.test/api/v1/blogs/hello'),
+      { ...baseEnv, RUNTIME_MODE: 'hybrid', CONTENT_SERVICE_TOKEN: 'content-token' },
+    );
+
+    expect(response.headers.get('X-Upstream-Route')).toBe('cloud-run-fallback');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('vps.example.test');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('content-service.example.test');
+  });
+
+  it('does not require a fallback upstream when a selfhost gateway is exercised', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('selfhost', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('auth').fetch(request, {
+      PRIMARY_UPSTREAM: 'https://vps.example.test',
+      RUNTIME_MODE: 'selfhost',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-Upstream-Route')).toBe('selfhost-primary');
   });
 });
