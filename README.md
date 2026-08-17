@@ -97,9 +97,9 @@ npm run typecheck
 `ai-workspace-infra/gitops` 渲染的环境配置；运行模式由 `spec.runtime.mode` 注入，支持
 `selfhost`、`serverless` 和 `hybrid`。UAT 的三个 canonical 声明分别位于：
 
-* `resources/svc.plus/uat/selfhost/edge-routing.yaml`
-* `resources/svc.plus/uat/serverless/edge-routing.yaml`
-* `resources/svc.plus/uat/hybrid/edge-routing.yaml`
+* `topology/uat/selfhost/runtime-topology.yaml`
+* `topology/uat/serverless/runtime-topology.yaml`
+* `topology/uat/hybrid/runtime-topology.yaml`
 
 `selfhost` 由 DNS 直接指向 VPS Full Stack，因此不部署 edge-gateway Worker；只有
 `serverless` 与 `hybrid` 部署三个 API boundary Workers。每次部署只能消费与
