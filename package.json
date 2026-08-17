@@ -11,7 +11,7 @@
     "deploy:admin": "bash .github/scripts/deploy_boundary.sh admin",
     "deploy:core": "bash .github/scripts/deploy_boundary.sh core",
     "deploy:all": "npm run deploy:auth && npm run deploy:admin && npm run deploy:core",
-    "test": "vitest run",
+    "test": "vitest run && bash test/deploy_boundary_contract.sh",
     "typecheck": "tsc --noEmit",
     "check:bundle-size": "bash scripts/check_bundle_size.sh"
   },
