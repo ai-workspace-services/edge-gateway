@@ -32,13 +32,13 @@ describe('runtime mode routing', () => {
   };
   type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 
-  it('routes vps mode to the VPS primary only', async () => {
-    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('vps', { status: 200 }));
+  it('routes selfhost mode to the VPS primary only', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('selfhost', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await createGatewayWorker('auth').fetch(request, { ...baseEnv, RUNTIME_MODE: 'vps' });
+    const response = await createGatewayWorker('auth').fetch(request, { ...baseEnv, RUNTIME_MODE: 'selfhost' });
 
-    expect(response.headers.get('X-Upstream-Route')).toBe('vps-primary');
+    expect(response.headers.get('X-Upstream-Route')).toBe('selfhost-primary');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain('vps.example.test');
   });
@@ -54,7 +54,7 @@ describe('runtime mode routing', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('cloud-run.example.test');
   });
 
-  it('fails over from VPS to Cloud Run only in hybrid mode', async () => {
+  it('fails over from selfhost to Cloud Run only in hybrid mode', async () => {
     const fetchMock = vi
       .fn<FetchArgs, Promise<Response>>()
       .mockResolvedValueOnce(new Response('vps unavailable', { status: 503 }))

@@ -80,13 +80,13 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
         return withRouteHeader(serverlessResponse, 'cloud-run-serverless');
       }
 
-      if (runtimeMode === 'vps') {
+      if (runtimeMode === 'selfhost') {
         const vpsResponse = await fetch(primaryUrl, {
           method: request.method,
           headers: proxyHeaders,
           body: request.body,
         });
-        return withRouteHeader(vpsResponse, 'vps-primary');
+        return withRouteHeader(vpsResponse, 'selfhost-primary');
       }
 
       try {
@@ -101,7 +101,7 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
         clearTimeout(timeoutId);
 
         if (primaryResponse.status < 500) {
-          return withRouteHeader(primaryResponse, 'vps-primary');
+          return withRouteHeader(primaryResponse, 'selfhost-primary');
         }
         throw new Error(`VPS upstream returned status ${primaryResponse.status}`);
       } catch (error) {

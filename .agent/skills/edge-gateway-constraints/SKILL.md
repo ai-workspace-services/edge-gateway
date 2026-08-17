@@ -50,7 +50,7 @@ The Edge Gateway serves as an intelligent, zero-cost traffic router with the fol
    * Fallback target: `FALLBACK_UPSTREAM` (GCP Cloud Run - Scale-to-0).
    * Timeout: Primary request MUST enforce a strict timeout (`TIMEOUT_MS`, default `2500ms`).
    * Fallback Trigger: On network timeout, connection refusal, or `5xx` server error from the primary node, the Worker MUST transparently retry and return the response from the fallback node within the same request lifecycle.
-   * Telemetry Headers: Must attach `X-Upstream-Route: vps-primary` or `X-Upstream-Route: cloud-run-fallback`.
+   * Telemetry Headers: Must attach `X-Upstream-Route: selfhost-primary` or `X-Upstream-Route: cloud-run-fallback`.
 
 ---
 
