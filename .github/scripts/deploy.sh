@@ -8,6 +8,7 @@ set -euo pipefail
 
 VAULT_ADDR="${VAULT_ADDR:-https://vault.svc.plus}"
 VAULT_SECRETS_PATH="${VAULT_SECRETS_PATH:-secret/data/edge-gateway}"
+CONFIG_FILE="${EDGE_GATEWAY_CONFIG_FILE:-config/edge-gateway-boundaries.json}"
 
 echo "==> [Vault] Fetching secrets from ${VAULT_ADDR} (${VAULT_SECRETS_PATH})..."
 
@@ -41,7 +42,11 @@ fi
 
 echo "==> [Deploy] Deploying edge-gateway API boundary Workers..."
 for boundary in auth admin core; do
-  worker_name="$(jq -er ".environments[\"${CLOUDFLARE_ENV:-uat}\"].boundaries[\"${boundary}\"].worker_name" config/edge-gateway-boundaries.json)"
+  if jq -e '.kind == "EdgeRoutingConfig"' "${CONFIG_FILE}" >/dev/null; then
+    worker_name="$(jq -er --arg boundary "${boundary}" '.spec.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
+  else
+    worker_name="$(jq -er ".environments[\"${CLOUDFLARE_ENV:-uat}\"].boundaries[\"${boundary}\"].worker_name" "${CONFIG_FILE}")"
+  fi
   if [[ -n "${JWT_SECRET:-}" ]]; then
     echo "==> [Wrangler] Updating JWT_SECRET for ${boundary} Worker..."
     printf '%s' "${JWT_SECRET}" | npx wrangler secret put JWT_SECRET --name "${worker_name}"
