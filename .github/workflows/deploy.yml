@@ -1,15 +1,56 @@
-name: Deploy Edge Gateway
+name: Edge Gateway CI and Deploy
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
+    tags:
+      - '*'
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy after CI (reserved for explicitly approved operations)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
   deploy:
     name: Deploy to Cloudflare Workers
+    needs: ci
+    # Snapshot and release tags carry no deployment input, so they run CI only.
+    # Production deployment is normally controlled by platform-ops-toolkit.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
