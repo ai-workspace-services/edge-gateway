@@ -12,7 +12,8 @@
     "deploy:core": "bash .github/scripts/deploy_boundary.sh core",
     "deploy:all": "npm run deploy:auth && npm run deploy:admin && npm run deploy:core",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:bundle-size": "bash scripts/check_bundle_size.sh"
   },
   "keywords": [
     "cloudflare-worker",

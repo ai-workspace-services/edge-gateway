@@ -39,6 +39,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Check Worker Bundle Size
+        run: npm run check:bundle-size
+
       - name: Test
         run: npm test
 
