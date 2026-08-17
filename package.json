@@ -6,7 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run deploy:all",
+    "deploy:auth": "wrangler deploy --config wrangler.auth.toml --env uat",
+    "deploy:admin": "wrangler deploy --config wrangler.admin.toml --env uat",
+    "deploy:core": "wrangler deploy --config wrangler.core.toml --env uat",
+    "deploy:all": "npm run deploy:auth && npm run deploy:admin && npm run deploy:core",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

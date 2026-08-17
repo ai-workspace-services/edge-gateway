@@ -10,8 +10,15 @@ export interface Env {
   TIMEOUT_MS?: string;
 }
 
+export type GatewayBoundary = 'auth' | 'admin' | 'core';
+
 // 公开无需鉴权的路径前缀
 export const PUBLIC_PATHS = [
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/verify-code',
+  '/api/auth/refresh',
+  '/api/auth/oauth',
   '/api/v1/auth/login',
   '/api/v1/auth/register',
   '/api/v1/auth/verify-code',
@@ -21,6 +28,16 @@ export const PUBLIC_PATHS = [
   '/api/v1/health',
   '/healthz',
 ];
+
+export function ownsPath(pathname: string, boundary: GatewayBoundary): boolean {
+  const authPath = pathname === '/api/auth' || pathname.startsWith('/api/auth/');
+  const legacyAuthPath = pathname === '/api/v1/auth' || pathname.startsWith('/api/v1/auth/');
+  const adminPath = pathname === '/api/admin' || pathname.startsWith('/api/admin/');
+
+  if (boundary === 'auth') return authPath || legacyAuthPath;
+  if (boundary === 'admin') return adminPath;
+  return pathname.startsWith('/api/') && !authPath && !legacyAuthPath && !adminPath;
+}
 
 // 标准 CORS 响应头
 export const CORS_HEADERS = {

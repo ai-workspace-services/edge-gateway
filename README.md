@@ -9,18 +9,19 @@
 
 ```mermaid
 graph TD
-    User[客户端 / 浏览器] -->|HTTPS 请求| Edge[edge-gateway: Cloudflare Worker]
+    User[客户端 / 浏览器] -->|HTTPS 请求| Edge[Cloudflare API boundary Workers]
 
     subgraph 边缘层 (Cloudflare Edge - 0ms 冷启动)
-        Edge --> C1[1. OPTIONS 预检秒级响应 204]
-        C1 --> C2[2. 边缘原生 Web Crypto JWT 验签]
-        C2 --> C3[3. 租户 ID / User ID 请求头注入]
-        C3 --> C4{4. 智能上游探测与熔断}
+        Edge --> C1[1. API auth / admin / core boundary]
+        C1 --> C2[2. OPTIONS 预检秒级响应 204]
+        C2 --> C3[3. 边缘原生 Web Crypto JWT 验签]
+        C3 --> C4[4. 租户 ID / User ID 请求头注入]
+        C4 --> C5{5. 智能上游探测与熔断}
     end
 
     subgraph 双轨计算后端
-        C4 -->|正常状态: 主路由 (99% 流量)| VPS[主节点: VPS (Docker Compose)<br/>• accounts / billing-service]
-        C4 -->|VPS 超时/5xx: 备用路由| CloudRun[备用节点: GCP Cloud Run<br/>• 缩容至 0 实例，毫秒级拉起]
+    C5 -->|正常状态: 主路由 (99% 流量)| VPS[主节点: VPS (Docker Compose)<br/>• accounts / billing-service]
+    C5 -->|VPS 超时/5xx: 备用路由| CloudRun[备用节点: GCP Cloud Run<br/>• 缩容至 0 实例，毫秒级拉起]
     end
 
     VPS --> Supa[(Supabase Cloud PostgreSQL)]
@@ -76,7 +77,17 @@ npm run typecheck
 推送至 `main` 分支时，GitHub Actions 会自动执行 [`.github/scripts/deploy.sh`](file:///.github/scripts/deploy.sh)：
 1. 连接 `https://vault.svc.plus` 动态读取最新 `JWT_SECRET`；
 2. 注入 Cloudflare Worker Secrets；
-3. 执行 `wrangler deploy` 完成零停机全球发布。
+3. 独立发布 `frontend-api-auth-uat`、`frontend-api-admin-uat`、`frontend-api-core-uat` 三个 Worker。
+
+## UAT API 边界
+
+| Worker | Route | 责任 |
+|---|---|---|
+| `frontend-api-auth-uat` | `console-uat.onwalk.net/api/auth/*`、`/api/v1/auth/*` | 登录、注册、刷新、OAuth 等公开认证入口 |
+| `frontend-api-admin-uat` | `console-uat.onwalk.net/api/admin/*` | 管理 API，默认要求 Bearer JWT |
+| `frontend-api-core-uat` | `console-uat.onwalk.net/api/*` | 其余 API 兜底，拒绝 auth/admin 保留边界 |
+
+三个入口共享原生 `fetch`、Web Crypto 和故障转移逻辑，不引入重型依赖；每个入口独立打包和部署。
 
 ---
 
