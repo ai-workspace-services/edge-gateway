@@ -23,6 +23,7 @@ if [[ "${runtime_mode}" == "selfhost" ]]; then
   exit 0
 fi
 worker_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
+boundary_display_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | (.display_name // .id)' "${CONFIG_FILE}")"
 mapfile -t route_suffixes < <(jq -er --arg boundary "${BOUNDARY}" '
   .spec.serverless.edge_gateway.boundaries[]
   | select(.id == $boundary)
@@ -53,5 +54,5 @@ while IFS=$'\t' read -r key value; do
   deploy_args+=(--var "${key}:${value}")
 done < <(jq -r "${vars_filter} | to_entries[] | [.key, .value] | @tsv" "${CONFIG_FILE}")
 
-echo "==> [Wrangler] Deploying ${worker_name} with routes: ${route_suffixes[*]}..."
+echo "==> [Wrangler] Deploying ${boundary_display_name} (${worker_name}) with routes: ${route_suffixes[*]}..."
 npx wrangler "${deploy_args[@]}"
