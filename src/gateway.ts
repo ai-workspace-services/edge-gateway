@@ -61,8 +61,11 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
       proxyHeaders.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
       proxyHeaders.set('X-Edge-Boundary', boundary);
 
-      const primaryBase = env.PRIMARY_UPSTREAM || 'https://vps-api.svc.plus';
-      const fallbackBase = env.FALLBACK_UPSTREAM || 'https://accounts-service-uc.a.run.app';
+      const primaryBase = env.PRIMARY_UPSTREAM;
+      const fallbackBase = env.FALLBACK_UPSTREAM;
+      if (!primaryBase || !fallbackBase) {
+        return jsonResponse({ code: 500, error: 'Gateway upstreams are not configured' }, 500);
+      }
       const timeoutMs = Number.parseInt(env.TIMEOUT_MS || '2500', 10);
       const primaryUrl = new URL(url.pathname + url.search, primaryBase);
       const fallbackUrl = new URL(url.pathname + url.search, fallbackBase);

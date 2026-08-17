@@ -3,14 +3,4 @@ main = "src/workers/auth.ts"
 compatibility_date = "2026-08-17"
 compatibility_flags = ["nodejs_compat"]
 
-[env.uat]
-name = "edge-gateway-auth-uat"
-routes = [
-  { pattern = "accounts-cloudflare-uat.onwalk.net/api/auth/*", zone_name = "onwalk.net" }
-]
-
-[env.uat.vars]
-PRIMARY_UPSTREAM = "https://vps-api.svc.plus"
-FALLBACK_UPSTREAM = "https://accounts-service-uc.a.run.app"
-JWT_ISSUER = "https://accounts.svc.plus"
-TIMEOUT_MS = "2500"
+# Worker name, route, and runtime variables are injected from GitOps at deploy time.
