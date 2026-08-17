@@ -3,7 +3,7 @@ set -euo pipefail
 
 BOUNDARY="${1:-}"
 CLOUDFLARE_ENV="${CLOUDFLARE_ENV:-uat}"
-CONFIG_FILE="${EDGE_GATEWAY_CONFIG_FILE:-config/edge-gateway-boundaries.json}"
+CONFIG_FILE="${EDGE_GATEWAY_CONFIG_FILE:?EDGE_GATEWAY_CONFIG_FILE must point to the rendered GitOps routing manifest}"
 
 case "${BOUNDARY}" in
   auth|admin|core) ;;
@@ -13,18 +13,14 @@ esac
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 test -f "${CONFIG_FILE}" || { echo "edge-gateway config not found: ${CONFIG_FILE}" >&2; exit 2; }
 
-if jq -e '.kind == "EdgeRoutingConfig"' "${CONFIG_FILE}" >/dev/null; then
-  worker_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
-  route_suffix="$(jq -er --arg boundary "${BOUNDARY}" '.spec.edge_gateway.boundaries[] | select(.id == $boundary) | .route' "${CONFIG_FILE}")"
-  api_host="$(jq -er '.spec.hosts.accounts_cloudflare' "${CONFIG_FILE}")"
-  vars_filter='.spec.edge_gateway.defaults | {PRIMARY_UPSTREAM: .primary_upstream, FALLBACK_UPSTREAM: .fallback_upstream, JWT_ISSUER: .jwt_issuer, TIMEOUT_MS: .timeout_ms}'
-else
-  environment_config=".environments[\"${CLOUDFLARE_ENV}\"]"
-  worker_name="$(jq -er "${environment_config}.boundaries[\"${BOUNDARY}\"].worker_name" "${CONFIG_FILE}")"
-  route_suffix="$(jq -er "${environment_config}.boundaries[\"${BOUNDARY}\"].route" "${CONFIG_FILE}")"
-  api_host="$(jq -er "${environment_config}.api_host" "${CONFIG_FILE}")"
-  vars_filter="${environment_config}.vars"
-fi
+jq -e '.kind == "EdgeRoutingConfig" and (.spec.runtime.mode == "serverless" or .spec.runtime.mode == "hybrid")' "${CONFIG_FILE}" >/dev/null || {
+  echo "GitOps routing manifest must be an active serverless or hybrid EdgeRoutingConfig" >&2
+  exit 2
+}
+worker_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
+route_suffix="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | .route' "${CONFIG_FILE}")"
+api_host="$(jq -er '.spec.serverless.accounts_host' "${CONFIG_FILE}")"
+vars_filter='{RUNTIME_MODE: .spec.runtime.mode} + (.spec.serverless.edge_gateway.defaults | {PRIMARY_UPSTREAM: .primary_upstream, FALLBACK_UPSTREAM: .fallback_upstream, JWT_ISSUER: .jwt_issuer, TIMEOUT_MS: .timeout_ms})'
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required" >&2
