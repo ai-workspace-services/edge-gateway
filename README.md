@@ -20,9 +20,9 @@ graph TD
     end
 
     subgraph 三种运行模式
-    C5 -->|selfhost| VPS[主节点: VPS Full Stack]
-    C5 -->|serverless| CloudRun[Cloud Run<br/>• accounts / content / billing]
-    C5 -->|hybrid: VPS 超时/5xx| CloudRun
+    C5 -->|selfhost: DNS 直达| VPS[主节点: VPS Full Stack]
+    C5 -->|serverless| CloudRun[Cloud Run<br/>• accounts / content-service / billing-service]
+    C5 -->|hybrid: selfhost 超时/5xx| CloudRun
     end
 
     VPS --> VPSDB[(自建 PostgreSQL)]
@@ -42,6 +42,7 @@ graph TD
 | `JWT_SECRET` | 与 Go 后端 `accounts` 相同的 JWT 验签密钥 | `s3cr3t_256bit_key...` |
 | `PRIMARY_UPSTREAM` | 主节点 VPS API 地址 | `https://vps-api.svc.plus` |
 | `FALLBACK_UPSTREAM` | 备用节点 GCP Cloud Run 地址 | `https://accounts-service-uc.a.run.app` |
+| `CONTENT_SERVICE_TOKEN` | Git-backed content-service 的服务间令牌 | 由 Vault 注入 |
 | `CLOUDFLARE_API_TOKEN` | 用于部署 Worker 的 Cloudflare Token | `cf_pat_xxxx` |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账户 ID | `a1b2c3d4...` |
 
@@ -76,7 +77,7 @@ npm run typecheck
 ## 🚢 CI/CD 自动化部署
 
 平台编排器通过 GitHub OIDC → Vault 执行 [`.github/scripts/deploy.sh`](file:///.github/scripts/deploy.sh)：
-1. 连接 `https://vault.svc.plus` 动态读取最新 `JWT_SECRET`；
+1. 连接 `https://vault.svc.plus` 动态读取最新 `JWT_SECRET` 与 Git-backed content-service 令牌；
 2. 注入 Cloudflare Worker Secrets；
 3. 从 GitOps 渲染的 `EdgeRoutingConfig` 读取 Worker 名称、API 主机、路径和上游变量，独立发布三个 Worker。
 
@@ -92,7 +93,15 @@ npm run typecheck
 
 部署不会把域名和 Worker 名称写进运行时代码。`EDGE_GATEWAY_CONFIG_FILE` 必须指向由
 `ai-workspace-infra/gitops` 渲染的环境配置；运行模式由 `spec.runtime.mode` 注入，支持
-`selfhost`、`serverless` 和 `hybrid`，仓库内不再维护部署用的环境 JSON。
+`selfhost`、`serverless` 和 `hybrid`。UAT 的三个 canonical 声明分别位于：
+
+* `resources/svc.plus/uat/cloudflare/selfhost/edge-routing.yaml`
+* `resources/svc.plus/uat/cloudflare/serverless/edge-routing.yaml`
+* `resources/svc.plus/uat/cloudflare/hybrid/edge-routing.yaml`
+
+`selfhost` 由 DNS 直接指向 VPS Full Stack，因此不部署 edge-gateway Worker；只有
+`serverless` 与 `hybrid` 部署三个 API boundary Workers。每次部署只能消费与
+`spec.runtime.mode` 一致的声明。
 
 ---
 
@@ -103,9 +112,19 @@ npm run typecheck
   * `/api/v1/auth/register`
   * `/api/v1/auth/verify-code`
   * `/api/v1/billing/stripe/webhook`
+  * `/api/v1/billing/plans`
+  * Git-backed content read APIs (`/api/v1/docs/*`, `/api/v1/blogs/*`, `/api/v1/products/*` 等)
   * `/healthz`
 * **受保护路由 (Protected API)**:
   * 自动拦截非法/过期 Bearer Token 并返回 `HTTP 401`，减轻后端计算负担。
+* **Git-backed CMS 路由**:
+  * `/api/v1/docs/*`、`/api/v1/blogs/*`、`/api/v1/products/*`、`/api/v1/website/*` 和
+    `/api/v1/home/*` 通过 `CONTENT_UPSTREAM` 访问 Git-backed `content-service`。
+  * Worker 使用 Vault 注入的 `CONTENT_SERVICE_TOKEN` 设置 `X-Service-Token`；浏览器不会
+    直接接触该凭据。
+* **Serverless service routing**:
+  * Accounts API 使用 `FALLBACK_UPSTREAM`，内容 API 使用 `CONTENT_UPSTREAM`，计费 API
+    使用 `BILLING_UPSTREAM`。
 * **响应头标记**:
   * `X-Upstream-Route: selfhost-primary`（Selfhost 或 hybrid 的主节点响应）
   * `X-Upstream-Route: cloud-run-serverless`（serverless 模式直达 Cloud Run）

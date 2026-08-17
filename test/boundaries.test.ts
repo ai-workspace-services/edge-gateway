@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ownsPath } from '../src/config';
+import { backendServiceForPath, isPublicPath, ownsPath } from '../src/config';
 
 describe('API boundary ownership', () => {
   it('assigns auth and legacy auth routes to the auth Worker', () => {
@@ -17,5 +17,17 @@ describe('API boundary ownership', () => {
     expect(ownsPath('/api/account/profile', 'core')).toBe(true);
     expect(ownsPath('/api/auth/login', 'core')).toBe(false);
     expect(ownsPath('/api/admin/users', 'core')).toBe(false);
+  });
+
+  it('classifies Git-backed CMS and billing APIs for service routing', () => {
+    expect(backendServiceForPath('/api/v1/products/xconnect')).toBe('content');
+    expect(backendServiceForPath('/api/v1/docs/pages/guide/overview')).toBe('content');
+    expect(backendServiceForPath('/api/v1/billing/plans')).toBe('billing');
+    expect(backendServiceForPath('/api/v1/billing/stripe/webhook')).toBe('accounts');
+  });
+
+  it('allows SSR content reads through the gateway without a user JWT', () => {
+    expect(isPublicPath('/api/v1/products/xconnect')).toBe(true);
+    expect(isPublicPath('/api/v1/products-archive')).toBe(false);
   });
 });

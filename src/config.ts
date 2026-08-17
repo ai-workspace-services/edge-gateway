@@ -2,10 +2,16 @@
  * 路由白名单与网关配置
  */
 
+export type RuntimeMode = 'selfhost' | 'serverless' | 'hybrid';
+
 export interface Env {
-  RUNTIME_MODE?: 'selfhost' | 'serverless' | 'hybrid';
+  RUNTIME_MODE?: RuntimeMode;
   PRIMARY_UPSTREAM?: string;
   FALLBACK_UPSTREAM?: string;
+  CONTENT_UPSTREAM?: string;
+  CMS_UPSTREAM?: string;
+  BILLING_UPSTREAM?: string;
+  CONTENT_SERVICE_TOKEN?: string;
   JWT_ISSUER?: string;
   JWT_SECRET?: string;
   TIMEOUT_MS?: string;
@@ -26,9 +32,51 @@ export const PUBLIC_PATHS = [
   '/api/v1/auth/refresh',
   '/api/v1/auth/oauth',
   '/api/v1/billing/stripe/webhook',
+  '/api/v1/billing/plans',
+  '/api/v1/blogs',
+  '/api/v1/docs',
+  '/api/v1/home',
+  '/api/v1/products',
+  '/api/v1/website',
   '/api/v1/health',
   '/healthz',
 ];
+
+const CONTENT_API_PATHS = [
+  '/api/v1/blogs',
+  '/api/v1/docs',
+  '/api/v1/home',
+  '/api/v1/products',
+  '/api/v1/website',
+];
+
+function matchesPath(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+export type BackendService = 'accounts' | 'content' | 'billing';
+
+export function backendServiceForPath(pathname: string): BackendService {
+  if (CONTENT_API_PATHS.some((path) => matchesPath(pathname, path))) {
+    return 'content';
+  }
+
+  // Stripe webhooks are handled by accounts, even though they share the
+  // billing URL family. Other billing APIs belong to billing-service.
+  if (
+    (matchesPath(pathname, '/api/billing') || matchesPath(pathname, '/api/v1/billing')) &&
+    !matchesPath(pathname, '/api/billing/stripe/webhook') &&
+    !matchesPath(pathname, '/api/v1/billing/stripe/webhook')
+  ) {
+    return 'billing';
+  }
+
+  return 'accounts';
+}
+
+export function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PATHS.some((path) => matchesPath(pathname, path));
+}
 
 export function ownsPath(pathname: string, boundary: GatewayBoundary): boolean {
   const authPath = pathname === '/api/auth' || pathname.startsWith('/api/auth/');
