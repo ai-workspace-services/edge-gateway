@@ -19,9 +19,10 @@ graph TD
         C4 --> C5{5. 智能上游探测与熔断}
     end
 
-    subgraph 双轨计算后端
-    C5 -->|正常状态: 主路由 (99% 流量)| VPS[主节点: VPS (Docker Compose)<br/>• accounts / billing-service]
-    C5 -->|VPS 超时/5xx: 备用路由| CloudRun[备用节点: GCP Cloud Run<br/>• 缩容至 0 实例，毫秒级拉起]
+    subgraph 三种运行模式
+    C5 -->|vps| VPS[主节点: VPS Full Stack]
+    C5 -->|serverless| CloudRun[Cloud Run<br/>• accounts / content / billing]
+    C5 -->|hybrid: VPS 超时/5xx| CloudRun
     end
 
     VPS --> VPSDB[(自建 PostgreSQL)]
@@ -90,7 +91,8 @@ npm run typecheck
 三个入口共享原生 `fetch`、Web Crypto 和故障转移逻辑，不引入重型依赖；每个入口独立打包和部署。
 
 部署不会把域名和 Worker 名称写进运行时代码。`EDGE_GATEWAY_CONFIG_FILE` 必须指向由
-`ai-workspace-infra/gitops` 渲染的环境配置；仓库内不再维护部署用的环境 JSON。
+`ai-workspace-infra/gitops` 渲染的环境配置；运行模式由 `spec.runtime.mode` 注入，支持
+`vps`、`serverless` 和 `hybrid`，仓库内不再维护部署用的环境 JSON。
 
 ---
 
@@ -105,5 +107,6 @@ npm run typecheck
 * **受保护路由 (Protected API)**:
   * 自动拦截非法/过期 Bearer Token 并返回 `HTTP 401`，减轻后端计算负担。
 * **响应头标记**:
-  * `X-Upstream-Route: vps-primary`（由主 VPS 节点响应）
-  * `X-Upstream-Route: cloud-run-fallback`（主节点故障时由 Cloud Run 响应）
+  * `X-Upstream-Route: vps-primary`（VPS 或 hybrid 的主节点响应）
+  * `X-Upstream-Route: cloud-run-serverless`（serverless 模式直达 Cloud Run）
+  * `X-Upstream-Route: cloud-run-fallback`（hybrid 模式 VPS 故障时由 Cloud Run 响应）

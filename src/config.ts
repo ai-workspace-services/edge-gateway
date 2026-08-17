@@ -3,6 +3,7 @@
  */
 
 export interface Env {
+  RUNTIME_MODE?: 'vps' | 'serverless' | 'hybrid';
   PRIMARY_UPSTREAM?: string;
   FALLBACK_UPSTREAM?: string;
   JWT_ISSUER?: string;

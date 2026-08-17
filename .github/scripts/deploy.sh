@@ -41,8 +41,8 @@ else
 fi
 
 echo "==> [Deploy] Deploying edge-gateway API boundary Workers..."
-jq -e '.kind == "EdgeRoutingConfig" and .spec.mode == "serverless"' "${CONFIG_FILE}" >/dev/null || {
-  echo "GitOps routing manifest must be an active serverless EdgeRoutingConfig" >&2
+jq -e '.kind == "EdgeRoutingConfig" and (.spec.runtime.mode == "serverless" or .spec.runtime.mode == "hybrid")' "${CONFIG_FILE}" >/dev/null || {
+  echo "GitOps routing manifest must be an active serverless or hybrid EdgeRoutingConfig" >&2
   exit 2
 }
 for boundary in auth admin core; do

@@ -63,12 +63,31 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
 
       const primaryBase = env.PRIMARY_UPSTREAM;
       const fallbackBase = env.FALLBACK_UPSTREAM;
+      const runtimeMode = env.RUNTIME_MODE || 'hybrid';
       if (!primaryBase || !fallbackBase) {
         return jsonResponse({ code: 500, error: 'Gateway upstreams are not configured' }, 500);
       }
       const timeoutMs = Number.parseInt(env.TIMEOUT_MS || '2500', 10);
       const primaryUrl = new URL(url.pathname + url.search, primaryBase);
       const fallbackUrl = new URL(url.pathname + url.search, fallbackBase);
+
+      if (runtimeMode === 'serverless') {
+        const serverlessResponse = await fetch(fallbackUrl, {
+          method: request.method,
+          headers: proxyHeaders,
+          body: request.body,
+        });
+        return withRouteHeader(serverlessResponse, 'cloud-run-serverless');
+      }
+
+      if (runtimeMode === 'vps') {
+        const vpsResponse = await fetch(primaryUrl, {
+          method: request.method,
+          headers: proxyHeaders,
+          body: request.body,
+        });
+        return withRouteHeader(vpsResponse, 'vps-primary');
+      }
 
       try {
         const controller = new AbortController();
