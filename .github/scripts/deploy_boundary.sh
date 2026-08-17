@@ -36,7 +36,7 @@ deploy_args=(
   --name "${worker_name}"
   --route "${api_host}${route_suffix}"
   --compatibility-date "2026-08-17"
-  --node-compat
+  --compatibility-flags "nodejs_compat"
 )
 while IFS=$'\t' read -r key value; do
   deploy_args+=(--var "${key}:${value}")
