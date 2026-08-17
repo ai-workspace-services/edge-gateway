@@ -77,17 +77,20 @@ npm run typecheck
 推送至 `main` 分支时，GitHub Actions 会自动执行 [`.github/scripts/deploy.sh`](file:///.github/scripts/deploy.sh)：
 1. 连接 `https://vault.svc.plus` 动态读取最新 `JWT_SECRET`；
 2. 注入 Cloudflare Worker Secrets；
-3. 独立发布 `frontend-api-auth-uat`、`frontend-api-admin-uat`、`frontend-api-core-uat` 三个 Worker。
+3. 从 `config/edge-gateway-boundaries.json` 读取环境、Worker 名称、API 主机、路径和上游变量，独立发布三个 Worker。
 
 ## UAT API 边界
 
 | Worker | Route | 责任 |
 |---|---|---|
-| `frontend-api-auth-uat` | `console-uat.onwalk.net/api/auth/*`、`/api/v1/auth/*` | 登录、注册、刷新、OAuth 等公开认证入口 |
-| `frontend-api-admin-uat` | `console-uat.onwalk.net/api/admin/*` | 管理 API，默认要求 Bearer JWT |
-| `frontend-api-core-uat` | `console-uat.onwalk.net/api/*` | 其余 API 兜底，拒绝 auth/admin 保留边界 |
+| `edge-gateway-auth-uat` | `accounts-cloudflare-uat.onwalk.net/api/auth/*` | 登录、注册、刷新、OAuth 等公开认证入口 |
+| `edge-gateway-admin-uat` | `accounts-cloudflare-uat.onwalk.net/api/admin/*` | 管理 API，默认要求 Bearer JWT |
+| `edge-gateway-core-uat` | `accounts-cloudflare-uat.onwalk.net/api/*` | 其余 API 兜底，拒绝 auth/admin 保留边界 |
 
 三个入口共享原生 `fetch`、Web Crypto 和故障转移逻辑，不引入重型依赖；每个入口独立打包和部署。
+
+部署不会把域名和 Worker 名称写进运行时代码。默认 UAT 配置通过
+`CLOUDFLARE_ENV` 选择，也可以使用 `EDGE_GATEWAY_CONFIG_FILE` 指向另一份同结构配置。
 
 ---
 

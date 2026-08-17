@@ -7,9 +7,9 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "npm run deploy:all",
-    "deploy:auth": "wrangler deploy --config wrangler.auth.toml --env uat",
-    "deploy:admin": "wrangler deploy --config wrangler.admin.toml --env uat",
-    "deploy:core": "wrangler deploy --config wrangler.core.toml --env uat",
+    "deploy:auth": "bash .github/scripts/deploy_boundary.sh auth",
+    "deploy:admin": "bash .github/scripts/deploy_boundary.sh admin",
+    "deploy:core": "bash .github/scripts/deploy_boundary.sh core",
     "deploy:all": "npm run deploy:auth && npm run deploy:admin && npm run deploy:core",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

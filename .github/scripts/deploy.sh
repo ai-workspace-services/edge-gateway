@@ -8,6 +8,7 @@ set -euo pipefail
 
 VAULT_ADDR="${VAULT_ADDR:-https://vault.svc.plus}"
 VAULT_SECRETS_PATH="${VAULT_SECRETS_PATH:-secret/data/edge-gateway}"
+CONFIG_FILE="${EDGE_GATEWAY_CONFIG_FILE:-config/edge-gateway-boundaries.json}"
 
 echo "==> [Vault] Fetching secrets from ${VAULT_ADDR} (${VAULT_SECRETS_PATH})..."
 
@@ -26,10 +27,6 @@ if [[ -z "${VAULT_RESPONSE}" ]]; then
 else
   # 提取 JWT_SECRET
   JWT_SECRET=$(echo "${VAULT_RESPONSE}" | jq -r '.data.data.JWT_SECRET // .data.JWT_SECRET // empty')
-  if [[ -n "${JWT_SECRET}" ]]; then
-    echo "==> [Wrangler] Injecting JWT_SECRET into Cloudflare Workers..."
-    echo -n "${JWT_SECRET}" | npx wrangler secret put JWT_SECRET || true
-  fi
 
   # 提取 CLOUDFLARE_API_TOKEN 与 CLOUDFLARE_ACCOUNT_ID (如果由 Vault 提供)
   CF_TOKEN=$(echo "${VAULT_RESPONSE}" | jq -r '.data.data.CLOUDFLARE_API_TOKEN // .data.CLOUDFLARE_API_TOKEN // empty')
@@ -44,8 +41,17 @@ else
 fi
 
 echo "==> [Deploy] Deploying edge-gateway API boundary Workers..."
-npx wrangler deploy --config wrangler.auth.toml --env uat
-npx wrangler deploy --config wrangler.admin.toml --env uat
-npx wrangler deploy --config wrangler.core.toml --env uat
+for boundary in auth admin core; do
+  if jq -e '.kind == "EdgeRoutingConfig"' "${CONFIG_FILE}" >/dev/null; then
+    worker_name="$(jq -er --arg boundary "${boundary}" '.spec.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
+  else
+    worker_name="$(jq -er ".environments[\"${CLOUDFLARE_ENV:-uat}\"].boundaries[\"${boundary}\"].worker_name" "${CONFIG_FILE}")"
+  fi
+  if [[ -n "${JWT_SECRET:-}" ]]; then
+    echo "==> [Wrangler] Updating JWT_SECRET for ${boundary} Worker..."
+    printf '%s' "${JWT_SECRET}" | npx wrangler secret put JWT_SECRET --name "${worker_name}"
+  fi
+  bash .github/scripts/deploy_boundary.sh "${boundary}"
+done
 
 echo "==> [Success] Edge Gateway deployment completed successfully."

@@ -1,12 +1,12 @@
-name = "frontend-api-admin"
+name = "edge-gateway-admin"
 main = "src/workers/admin.ts"
 compatibility_date = "2026-08-17"
 compatibility_flags = ["nodejs_compat"]
 
 [env.uat]
-name = "frontend-api-admin-uat"
+name = "edge-gateway-admin-uat"
 routes = [
-  { pattern = "console-uat.onwalk.net/api/admin/*", zone_name = "onwalk.net" }
+  { pattern = "accounts-cloudflare-uat.onwalk.net/api/admin/*", zone_name = "onwalk.net" }
 ]
 
 [env.uat.vars]
