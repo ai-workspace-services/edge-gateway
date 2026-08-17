@@ -1,0 +1,28 @@
+{
+  "environments": {
+    "uat": {
+      "zone_name": "onwalk.net",
+      "api_host": "accounts-cloudflare-uat.onwalk.net",
+      "vars": {
+        "PRIMARY_UPSTREAM": "https://accounts-vps-uat.onwalk.net",
+        "FALLBACK_UPSTREAM": "https://accounts-service-uc.a.run.app",
+        "JWT_ISSUER": "https://accounts-cloudflare-uat.onwalk.net",
+        "TIMEOUT_MS": "2500"
+      },
+      "boundaries": {
+        "auth": {
+          "worker_name": "edge-gateway-auth-uat",
+          "route": "/api/auth/*"
+        },
+        "admin": {
+          "worker_name": "edge-gateway-admin-uat",
+          "route": "/api/admin/*"
+        },
+        "core": {
+          "worker_name": "edge-gateway-core-uat",
+          "route": "/api/*"
+        }
+      }
+    }
+  }
+}
