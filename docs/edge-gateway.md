@@ -228,9 +228,9 @@ export async function handle(request: Request): Promise<Response> {
 三份完整声明位于 `ai-workspace-infra/gitops`：
 
 ```text
-resources/svc.plus/uat/selfhost/edge-routing.yaml
-resources/svc.plus/uat/serverless/edge-routing.yaml
-resources/svc.plus/uat/hybrid/edge-routing.yaml
+topology/uat/selfhost/runtime-topology.yaml
+topology/uat/serverless/runtime-topology.yaml
+topology/uat/hybrid/runtime-topology.yaml
 ```
 
 每份声明都必须满足：
