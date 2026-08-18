@@ -101,6 +101,43 @@ describe('runtime mode routing', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('billing-service.example.test');
   });
 
+  it('routes the Billing custom domain health endpoint to billing-service', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('ready', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://billing-serverless.example.test/readyz'),
+      {
+        ...baseEnv,
+        BILLING_HOST: 'billing-serverless.example.test',
+        RUNTIME_MODE: 'serverless',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-Upstream-Route')).toBe('cloud-run-serverless');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('billing-service.example.test/readyz');
+  });
+
+  it('keeps Billing ingest paths authenticated on the custom domain', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://billing-serverless.example.test/v1/ingest/snapshots', {
+        method: 'POST',
+      }),
+      {
+        ...baseEnv,
+        BILLING_HOST: 'billing-serverless.example.test',
+        RUNTIME_MODE: 'serverless',
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('uses content-service as the hybrid fallback for CMS reads', async () => {
     const fetchMock = vi
       .fn<FetchArgs, Promise<Response>>()

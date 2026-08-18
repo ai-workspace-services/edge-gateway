@@ -6,9 +6,14 @@ import {
   Env,
   GatewayBoundary,
   isPublicPath,
+  ownsBillingHostPath,
   ownsPath,
 } from './config';
 import { verifyJWT } from './jwt';
+
+function isBillingHost(hostname: string, configuredHost?: string): boolean {
+  return Boolean(configuredHost && hostname === configuredHost.trim().toLowerCase());
+}
 
 function jsonResponse(body: Record<string, unknown>, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -49,8 +54,13 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       const url = new URL(request.url);
+      const billingHostRequest =
+        boundary === 'core' && isBillingHost(url.hostname, env.BILLING_HOST);
 
-      if (!ownsPath(url.pathname, boundary)) {
+      if (
+        !ownsPath(url.pathname, boundary) &&
+        !(billingHostRequest && ownsBillingHostPath(url.pathname))
+      ) {
         return jsonResponse({ code: 404, error: `Unknown API boundary: ${boundary}` }, 404);
       }
 
@@ -103,7 +113,9 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
         return jsonResponse({ code: 500, error: 'Fallback upstream is not configured' }, 500);
       }
 
-      const backendService = backendServiceForPath(url.pathname);
+      const backendService = billingHostRequest
+        ? 'billing'
+        : backendServiceForPath(url.pathname);
       const contentBase = env.CONTENT_UPSTREAM || env.CMS_UPSTREAM;
       const billingBase = env.BILLING_UPSTREAM;
       const serviceFallbackBase =
