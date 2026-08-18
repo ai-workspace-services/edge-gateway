@@ -34,6 +34,19 @@ if [[ "${#route_suffixes[@]}" -eq 0 ]]; then
   exit 2
 fi
 api_host="$(jq -er '.spec.serverless.accounts_host' "${CONFIG_FILE}")"
+
+# GitOps canonical aliases remain DNS CNAMEs to the mode-qualified host. The
+# Core Worker must also own the canonical API route so Cloudflare dispatches
+# the request by the original Host header instead of attempting to chain one
+# Worker Custom Domain through another CNAME.
+canonical_routes=()
+if [[ "${BOUNDARY}" == "core" ]]; then
+  while IFS=$'\t' read -r canonical_host canonical_target; do
+    [[ -n "${canonical_host}" && "${canonical_target}" == "${api_host}" ]] || continue
+    canonical_routes+=("${canonical_host}/api/*")
+  done < <(jq -r '.spec.runtime.routing.dns.canonical_records // {} | to_entries[] | [.key, .value] | @tsv' "${CONFIG_FILE}")
+fi
+
 vars_filter='(.spec.serverless.edge_gateway.defaults // {}) as $defaults | (.spec.serverless.cloud_run // {}) as $cloud_run | {RUNTIME_MODE: .spec.runtime.mode, PRIMARY_UPSTREAM: $defaults.primary_upstream, FALLBACK_UPSTREAM: $defaults.fallback_upstream, CONTENT_UPSTREAM: ($cloud_run.content_service // $defaults.content_upstream), BILLING_UPSTREAM: ($cloud_run.billing_service // $defaults.billing_upstream), JWT_ISSUER: $defaults.jwt_issuer, TIMEOUT_MS: $defaults.timeout_ms} | with_entries(select(.value != null and .value != ""))'
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
@@ -49,6 +62,9 @@ deploy_args=(
 )
 for route_suffix in "${route_suffixes[@]}"; do
   deploy_args+=(--route "${api_host}${route_suffix}")
+done
+for route in "${canonical_routes[@]}"; do
+  deploy_args+=(--route "${route}")
 done
 while IFS=$'\t' read -r key value; do
   deploy_args+=(--var "${key}:${value}")
