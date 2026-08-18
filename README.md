@@ -89,7 +89,7 @@ npm run typecheck
 |---|---|---|
 | `edge-gateway-auth-uat` | `accounts-cloudflare-uat.onwalk.net/api/auth/*` | 登录、注册、刷新、OAuth 等公开认证入口 |
 | `edge-gateway-admin-uat` | `accounts-cloudflare-uat.onwalk.net/api/admin/*` | 管理 API，默认要求 Bearer JWT |
-| `edge-gateway-core-uat` | `accounts-cloudflare-uat.onwalk.net/api/*` | 其余 API 兜底，拒绝 auth/admin 保留边界 |
+| Edge Gateway Router Core<br>`edge-gateway-core-uat` | `accounts-cloudflare-uat.onwalk.net` Custom Domain owner；`/api/*` | Accounts 入口 owner 和其余 API 兜底，拒绝 auth/admin 保留边界 |
 
 三个入口共享原生 `fetch`、Web Crypto 和故障转移逻辑，不引入重型依赖；每个入口独立打包和部署。
 

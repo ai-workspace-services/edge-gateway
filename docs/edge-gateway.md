@@ -58,7 +58,7 @@ Edge Gateway 拆成三个独立 Worker，每个可执行 bundle 都必须严格�
 | --- | --- | --- | --- |
 | auth | `src/workers/auth.ts` | `/api/auth/*`、`/api/v1/auth/*` | 登录、注册、刷新、OAuth |
 | admin | `src/workers/admin.ts` | `/api/admin/*` | 管理 API，默认需要 JWT |
-| core | `src/workers/core.ts` | `/api/*` 兜底 | 账户、内容、计费等其他 API |
+| Edge Gateway Router Core<br>`core` | `src/workers/core.ts` | Accounts Custom Domain owner；`/api/*` 兜底 | 账户、内容、计费等其他 API |
 
 Cloudflare Worker 配置分别对应 `wrangler.auth.toml`、`wrangler.admin.toml` 和 `wrangler.core.toml`。Worker 名称、域名和 route 不写入 TypeScript 运行时代码，而由 GitOps deployment script 注入。
 
@@ -239,7 +239,7 @@ topology/uat/hybrid/runtime-topology.yaml
 - runtime mode 只能是 `selfhost`、`serverless` 或 `hybrid`；
 - 保留 5 个 SSR boundary、3 个 Edge Gateway boundary；
 - 不在 GitOps 中写入 JWT、数据库、Cloudflare 或服务账号凭据；
-- `core` 继续拥有 `/api/*` 兜底边界。
+- Edge Gateway Router Core（稳定 ID 为 `core`）继续拥有 Accounts Custom Domain 与 `/api/*` 兜底边界。
 
 部署入口通过 `EDGE_GATEWAY_CONFIG_FILE` 指向编排器渲染后的声明。选择 selfhost 时部署脚本安全退出；选择 serverless 或 hybrid 时，读取对应声明发布三个 Worker。
 

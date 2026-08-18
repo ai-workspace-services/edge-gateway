@@ -23,14 +23,17 @@ if [[ "${runtime_mode}" == "selfhost" ]]; then
   exit 0
 fi
 worker_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
+boundary_display_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | (.display_name // .id)' "${CONFIG_FILE}")"
+mapfile -t route_suffixes < <(jq -er --arg boundary "${BOUNDARY}" '
+  .spec.serverless.edge_gateway.boundaries[]
+  | select(.id == $boundary)
+  | (.routes // [.route])[]
+' "${CONFIG_FILE}")
+if [[ "${#route_suffixes[@]}" -eq 0 ]]; then
+  echo "edge-gateway boundary ${BOUNDARY} must define at least one route" >&2
+  exit 2
+fi
 api_host="$(jq -er '.spec.serverless.accounts_host' "${CONFIG_FILE}")"
-mapfile -t routes < <(
-  jq -r --arg boundary "${BOUNDARY}" '
-    .spec.serverless.edge_gateway.boundaries[]
-    | select(.id == $boundary)
-    | if .routes then .routes[] elif .route then .route else empty end
-  ' "${CONFIG_FILE}"
-)
 
 # GitOps canonical aliases remain DNS CNAMEs to the mode-qualified host. The
 # Core Worker must also own the canonical API route so Cloudflare dispatches
@@ -42,11 +45,6 @@ if [[ "${BOUNDARY}" == "core" ]]; then
     [[ -n "${canonical_host}" && "${canonical_target}" == "${api_host}" ]] || continue
     canonical_routes+=("${canonical_host}/api/*")
   done < <(jq -r '.spec.runtime.routing.dns.canonical_records // {} | to_entries[] | [.key, .value] | @tsv' "${CONFIG_FILE}")
-fi
-
-if [[ "${#routes[@]}" -eq 0 ]]; then
-  echo "No routes found for boundary ${BOUNDARY}" >&2
-  exit 2
 fi
 
 vars_filter='(.spec.serverless.edge_gateway.defaults // {}) as $defaults | (.spec.serverless.cloud_run // {}) as $cloud_run | {RUNTIME_MODE: .spec.runtime.mode, PRIMARY_UPSTREAM: $defaults.primary_upstream, FALLBACK_UPSTREAM: $defaults.fallback_upstream, CONTENT_UPSTREAM: ($cloud_run.content_service // $defaults.content_upstream), BILLING_UPSTREAM: ($cloud_run.billing_service // $defaults.billing_upstream), JWT_ISSUER: $defaults.jwt_issuer, TIMEOUT_MS: $defaults.timeout_ms} | with_entries(select(.value != null and .value != ""))'
@@ -62,15 +60,15 @@ deploy_args=(
   --compatibility-date "2026-08-17"
   --compatibility-flags "nodejs_compat"
 )
-for r in "${routes[@]}"; do
-  deploy_args+=(--route "${api_host}${r}")
+for route_suffix in "${route_suffixes[@]}"; do
+  deploy_args+=(--route "${api_host}${route_suffix}")
 done
-for r in "${canonical_routes[@]}"; do
-  deploy_args+=(--route "${r}")
+for route in "${canonical_routes[@]}"; do
+  deploy_args+=(--route "${route}")
 done
 while IFS=$'\t' read -r key value; do
   deploy_args+=(--var "${key}:${value}")
 done < <(jq -r "${vars_filter} | to_entries[] | [.key, .value] | @tsv" "${CONFIG_FILE}")
 
-echo "==> [Wrangler] Deploying ${worker_name} with routes: ${routes[*]} on ${api_host}..."
+echo "==> [Wrangler] Deploying ${boundary_display_name} (${worker_name}) with routes: ${route_suffixes[*]}..."
 npx wrangler "${deploy_args[@]}"
