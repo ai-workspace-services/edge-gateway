@@ -37,7 +37,7 @@ if [[ "${#routes[@]}" -eq 0 ]]; then
   exit 2
 fi
 
-vars_filter='(.spec.serverless.edge_gateway.defaults // {}) as $defaults | (.spec.serverless.cloud_run // {}) as $cloud_run | {RUNTIME_MODE: .spec.runtime.mode, PRIMARY_UPSTREAM: $defaults.primary_upstream, FALLBACK_UPSTREAM: $defaults.fallback_upstream, CONTENT_UPSTREAM: ($cloud_run.content_service // $defaults.content_upstream), BILLING_UPSTREAM: ($cloud_run.billing_service // $defaults.billing_upstream), BILLING_HOST: .spec.serverless.billing_host, JWT_ISSUER: $defaults.jwt_issuer, TIMEOUT_MS: $defaults.timeout_ms} | with_entries(select(.value != null and .value != ""))'
+vars_filter='(.spec.serverless.edge_gateway.defaults // {}) as $defaults | (.spec.serverless.cloud_run // {}) as $cloud_run | {RUNTIME_MODE: .spec.runtime.mode, PRIMARY_UPSTREAM: $defaults.primary_upstream, FALLBACK_UPSTREAM: $defaults.fallback_upstream, CONTENT_UPSTREAM: ($cloud_run.content_service // $defaults.content_upstream), BILLING_UPSTREAM: ($cloud_run.billing_service // $defaults.billing_upstream), JWT_ISSUER: $defaults.jwt_issuer, TIMEOUT_MS: $defaults.timeout_ms} | with_entries(select(.value != null and .value != ""))'
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required" >&2

@@ -11,7 +11,6 @@ export interface Env {
   CONTENT_UPSTREAM?: string;
   CMS_UPSTREAM?: string;
   BILLING_UPSTREAM?: string;
-  BILLING_HOST?: string;
   CONTENT_SERVICE_TOKEN?: string;
   JWT_ISSUER?: string;
   JWT_SECRET?: string;
@@ -41,7 +40,6 @@ export const PUBLIC_PATHS = [
   '/api/v1/website',
   '/api/v1/health',
   '/healthz',
-  '/readyz',
 ];
 
 const CONTENT_API_PATHS = [
@@ -88,20 +86,6 @@ export function ownsPath(pathname: string, boundary: GatewayBoundary): boolean {
   if (boundary === 'auth') return authPath || legacyAuthPath;
   if (boundary === 'admin') return adminPath;
   return pathname.startsWith('/api/') && !authPath && !legacyAuthPath && !adminPath;
-}
-
-/**
- * Billing has its own public hostname but shares the core Worker. Keep the
- * non-API health and ingest paths behind an explicit host contract instead of
- * widening the core boundary for every hostname.
- */
-export function ownsBillingHostPath(pathname: string): boolean {
-  return (
-    pathname === '/healthz' ||
-    pathname === '/readyz' ||
-    pathname.startsWith('/api/') ||
-    pathname.startsWith('/v1/')
-  );
 }
 
 // 标准 CORS 响应头
