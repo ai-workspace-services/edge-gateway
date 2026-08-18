@@ -32,6 +32,18 @@ mapfile -t routes < <(
   ' "${CONFIG_FILE}"
 )
 
+# GitOps canonical aliases remain DNS CNAMEs to the mode-qualified host. The
+# Core Worker must also own the canonical API route so Cloudflare dispatches
+# the request by the original Host header instead of attempting to chain one
+# Worker Custom Domain through another CNAME.
+canonical_routes=()
+if [[ "${BOUNDARY}" == "core" ]]; then
+  while IFS=$'\t' read -r canonical_host canonical_target; do
+    [[ -n "${canonical_host}" && "${canonical_target}" == "${api_host}" ]] || continue
+    canonical_routes+=("${canonical_host}/api/*")
+  done < <(jq -r '.spec.runtime.routing.dns.canonical_records // {} | to_entries[] | [.key, .value] | @tsv' "${CONFIG_FILE}")
+fi
+
 if [[ "${#routes[@]}" -eq 0 ]]; then
   echo "No routes found for boundary ${BOUNDARY}" >&2
   exit 2
@@ -52,6 +64,9 @@ deploy_args=(
 )
 for r in "${routes[@]}"; do
   deploy_args+=(--route "${api_host}${r}")
+done
+for r in "${canonical_routes[@]}"; do
+  deploy_args+=(--route "${r}")
 done
 while IFS=$'\t' read -r key value; do
   deploy_args+=(--var "${key}:${value}")
