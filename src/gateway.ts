@@ -49,8 +49,10 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       const url = new URL(request.url);
+      const isBillingCustomDomain =
+        boundary === 'core' && Boolean(env.BILLING_HOST) && url.hostname === env.BILLING_HOST;
 
-      if (!ownsPath(url.pathname, boundary)) {
+      if (!isBillingCustomDomain && !ownsPath(url.pathname, boundary)) {
         return jsonResponse({ code: 404, error: `Unknown API boundary: ${boundary}` }, 404);
       }
 
@@ -58,7 +60,8 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
         return new Response(null, { status: 204, headers: CORS_HEADERS });
       }
 
-      const isPublic = isPublicPath(url.pathname);
+      const isPublic =
+        isPublicPath(url.pathname) || (isBillingCustomDomain && url.pathname === '/readyz');
       let validatedUser: Record<string, any> | null = null;
 
       if (!isPublic) {
@@ -89,6 +92,15 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
       proxyHeaders.set('X-Forwarded-Host', url.host);
       proxyHeaders.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
       proxyHeaders.set('X-Edge-Boundary', boundary);
+
+      if (isBillingCustomDomain) {
+        if (!env.BILLING_UPSTREAM) {
+          return jsonResponse({ code: 500, error: 'Billing upstream is not configured' }, 500);
+        }
+        const billingUrl = new URL(url.pathname + url.search, env.BILLING_UPSTREAM);
+        const billingResponse = await fetch(billingUrl, requestInit(request, proxyHeaders));
+        return withRouteHeader(billingResponse, 'cloud-run-billing');
+      }
 
       const primaryBase = env.PRIMARY_UPSTREAM;
       const fallbackBase = env.FALLBACK_UPSTREAM;

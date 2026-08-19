@@ -10,6 +10,7 @@ export interface Env {
   FALLBACK_UPSTREAM?: string;
   CONTENT_UPSTREAM?: string;
   CMS_UPSTREAM?: string;
+  BILLING_HOST?: string;
   BILLING_UPSTREAM?: string;
   CONTENT_SERVICE_TOKEN?: string;
   JWT_ISSUER?: string;
