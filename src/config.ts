@@ -21,17 +21,33 @@ export interface Env {
 export type GatewayBoundary = 'auth' | 'admin' | 'core';
 
 // 公开无需鉴权的路径前缀
+//
+// Anything the sign-in, sign-up or e-mail verification screens call *before* a
+// session exists belongs here. A missing entry does not fail loudly: the caller
+// is anonymous by definition, so it just gets a 401 the screen has to swallow,
+// and the feature degrades silently. Endpoints reached only after sign-in
+// (/api/auth/session, /api/auth/mfa/setup, /api/auth/mfa/verify) must stay off
+// this list.
 export const PUBLIC_PATHS = [
   '/api/auth/login',
   '/api/auth/register',
   '/api/auth/verify-code',
+  '/api/auth/verify-email',
   '/api/auth/refresh',
   '/api/auth/oauth',
+  // Read on the login screen to decide whether to ask for a TOTP code, so it
+  // runs while the visitor is still anonymous.
+  '/api/auth/mfa/status',
+  // Trades an OAuth callback code for a session; there is no session yet.
+  '/api/auth/token/exchange',
   '/api/v1/auth/login',
   '/api/v1/auth/register',
   '/api/v1/auth/verify-code',
+  '/api/v1/auth/verify-email',
   '/api/v1/auth/refresh',
   '/api/v1/auth/oauth',
+  '/api/v1/auth/mfa/status',
+  '/api/v1/auth/token/exchange',
   '/api/v1/billing/stripe/webhook',
   '/api/v1/billing/plans',
   '/api/v1/blogs',
