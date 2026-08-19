@@ -4,6 +4,7 @@ import {
   backendServiceForPath,
   CORS_HEADERS,
   Env,
+  failoverMethodsFromEnv,
   GatewayBoundary,
   isPublicPath,
   ownsPath,
@@ -156,6 +157,10 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
         return withRouteHeader(vpsResponse, 'selfhost-primary');
       }
 
+      const mayFailOver = failoverMethodsFromEnv(env.FAILOVER_METHODS).includes(
+        request.method.toUpperCase(),
+      );
+
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const controller = new AbortController();
@@ -165,8 +170,18 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
         if (primaryResponse.status < 500) {
           return withRouteHeader(primaryResponse, 'selfhost-primary');
         }
+        if (!mayFailOver) {
+          return withRouteHeader(primaryResponse, 'selfhost-primary');
+        }
         throw new Error(`VPS upstream returned status ${primaryResponse.status}`);
       } catch (error) {
+        if (!mayFailOver) {
+          console.warn(`[Failover:${boundary}] Primary upstream failed for unsafe method ${request.method}; not retried`, error);
+          return jsonResponse(
+            { code: 502, error: `Primary upstream unavailable and ${request.method} may not fail over` },
+            502,
+          );
+        }
         console.warn(`[Failover:${boundary}] Primary upstream failed`, error);
         const fallbackResponse = await fetch(fallbackUrl!, requestInit(request, proxyHeaders));
         return withRouteHeader(fallbackResponse, 'cloud-run-fallback');
