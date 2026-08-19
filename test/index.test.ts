@@ -72,6 +72,71 @@ describe('runtime mode routing', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('cloud-run.example.test');
   });
 
+  it('does not fail a mutating request over to Cloud Run', async () => {
+    const fetchMock = vi
+      .fn<FetchArgs, Promise<Response>>()
+      .mockResolvedValueOnce(new Response('vps unavailable', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const post = new Request('https://accounts.example.test/api/auth/login', { method: 'POST' });
+    const response = await createGatewayWorker('auth').fetch(post, { ...baseEnv, RUNTIME_MODE: 'hybrid' });
+
+    // The primary's own failure is returned rather than replayed against a
+    // different database.
+    expect(response.headers.get('X-Upstream-Route')).toBe('selfhost-primary');
+    expect(response.status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 502 rather than failing a mutating request over when the primary throws', async () => {
+    const fetchMock = vi
+      .fn<FetchArgs, Promise<Response>>()
+      .mockRejectedValueOnce(new Error('primary timed out'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const post = new Request('https://accounts.example.test/api/auth/login', { method: 'POST' });
+    const response = await createGatewayWorker('auth').fetch(post, { ...baseEnv, RUNTIME_MODE: 'hybrid' });
+
+    // A write that times out mid-flight must never be retried elsewhere.
+    expect(response.status).toBe(502);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('honours a narrowed FAILOVER_METHODS declaration', async () => {
+    const fetchMock = vi
+      .fn<FetchArgs, Promise<Response>>()
+      .mockResolvedValueOnce(new Response('vps unavailable', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const head = new Request('https://accounts.example.test/api/auth/login', { method: 'HEAD' });
+    const response = await createGatewayWorker('auth').fetch(head, {
+      ...baseEnv,
+      RUNTIME_MODE: 'hybrid',
+      FAILOVER_METHODS: 'GET',
+    });
+
+    expect(response.headers.get('X-Upstream-Route')).toBe('selfhost-primary');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('cannot be configured to fail a mutating method over', async () => {
+    const fetchMock = vi
+      .fn<FetchArgs, Promise<Response>>()
+      .mockResolvedValueOnce(new Response('vps unavailable', { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const put = new Request('https://accounts.example.test/api/auth/login', { method: 'PUT' });
+    const response = await createGatewayWorker('auth').fetch(put, {
+      ...baseEnv,
+      RUNTIME_MODE: 'hybrid',
+      FAILOVER_METHODS: 'GET,PUT,DELETE',
+    });
+
+    // The safe-method allowlist is a floor the declaration cannot raise.
+    expect(response.headers.get('X-Upstream-Route')).toBe('selfhost-primary');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('routes public Git-backed CMS reads to content-service with its service token', async () => {
     const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async (_input, init) => {
       expect(new Headers(init?.headers).get('X-Service-Token')).toBe('content-token');

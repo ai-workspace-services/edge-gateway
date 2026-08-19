@@ -17,7 +17,10 @@ cat >"${test_dir}/routing.json" <<'EOF'
       "billing_host": "billing-serverless-uat.onwalk.net",
       "cloud_run": {"billing_service": "https://billing.example.test"},
       "edge_gateway": {
-        "defaults": {"fallback_upstream": "https://accounts.example.test"},
+        "defaults": {
+          "fallback_upstream": "https://accounts.example.test",
+          "failover_methods": ["GET", "HEAD", "OPTIONS"]
+        },
         "boundaries": [
           {
             "id": "auth",
@@ -52,5 +55,6 @@ grep -Fqx -- 'accounts-cloudflare-uat.onwalk.net/api/auth/*' "${test_dir}/npx.ar
 grep -Fqx -- 'accounts-cloudflare-uat.onwalk.net/api/v1/auth/*' "${test_dir}/npx.args"
 grep -Fqx -- 'BILLING_HOST:billing-serverless-uat.onwalk.net' "${test_dir}/npx.args"
 grep -Fqx -- 'BILLING_UPSTREAM:https://billing.example.test' "${test_dir}/npx.args"
+grep -Fqx -- 'FAILOVER_METHODS:GET,HEAD,OPTIONS' "${test_dir}/npx.args"
 
 echo "deploy_boundary_contract: PASS"

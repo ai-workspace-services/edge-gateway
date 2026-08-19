@@ -16,6 +16,24 @@ export interface Env {
   JWT_ISSUER?: string;
   JWT_SECRET?: string;
   TIMEOUT_MS?: string;
+  FAILOVER_METHODS?: string;
+}
+
+// Hybrid failover crosses a database boundary: the selfhost primary writes to
+// the VPS-managed PostgreSQL, the Cloud Run fallback writes to Supabase. Only
+// methods that cannot mutate state may cross it, so a request the primary could
+// not answer can never become a second write on the other side. A primary that
+// times out mid-write is exactly the case this prevents from being replayed.
+export const SAFE_FAILOVER_METHODS = ['GET', 'HEAD', 'OPTIONS'];
+
+export function failoverMethodsFromEnv(value: string | undefined): string[] {
+  if (!value) return SAFE_FAILOVER_METHODS;
+  const declared = value
+    .split(',')
+    .map((method) => method.trim().toUpperCase())
+    .filter(Boolean);
+  if (declared.length === 0) return SAFE_FAILOVER_METHODS;
+  return declared.filter((method) => SAFE_FAILOVER_METHODS.includes(method));
 }
 
 export type GatewayBoundary = 'auth' | 'admin' | 'core';
