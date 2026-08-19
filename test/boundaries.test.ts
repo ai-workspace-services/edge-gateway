@@ -30,4 +30,29 @@ describe('API boundary ownership', () => {
     expect(isPublicPath('/api/v1/products/xconnect')).toBe(true);
     expect(isPublicPath('/api/v1/products-archive')).toBe(false);
   });
+
+  it('allows the pre-authentication sign-in endpoints', () => {
+    // The login screen reads the MFA status before any session exists; a 401
+    // here leaves the verification-method selector permanently empty.
+    expect(isPublicPath('/api/auth/mfa/status')).toBe(true);
+    // The OAuth callback trades a code for a session, so it cannot present one.
+    expect(isPublicPath('/api/auth/token/exchange')).toBe(true);
+    expect(isPublicPath('/api/auth/verify-email')).toBe(true);
+    expect(isPublicPath('/api/auth/verify-email/send')).toBe(true);
+    expect(isPublicPath('/api/auth/register/send')).toBe(true);
+    expect(isPublicPath('/api/v1/auth/mfa/status')).toBe(true);
+    expect(isPublicPath('/api/v1/auth/token/exchange')).toBe(true);
+  });
+
+  it('keeps post-authentication endpoints behind the gateway', () => {
+    // Enrolling and confirming a TOTP secret happen from an authenticated
+    // session; only the status probe runs before sign-in.
+    expect(isPublicPath('/api/auth/mfa/setup')).toBe(false);
+    expect(isPublicPath('/api/auth/mfa/verify')).toBe(false);
+    expect(isPublicPath('/api/auth/session')).toBe(false);
+    expect(isPublicPath('/api/auth/subscriptions')).toBe(false);
+    // Prefix matching must not leak a neighbouring path.
+    expect(isPublicPath('/api/auth/mfa/status-report')).toBe(false);
+    expect(isPublicPath('/api/auth/token/introspect')).toBe(false);
+  });
 });
