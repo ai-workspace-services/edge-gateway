@@ -29,6 +29,7 @@ describe('runtime mode routing', () => {
     PRIMARY_UPSTREAM: 'https://vps.example.test',
     FALLBACK_UPSTREAM: 'https://cloud-run.example.test',
     CONTENT_UPSTREAM: 'https://content-service.example.test',
+    BILLING_HOST: 'billing-serverless.example.test',
     BILLING_UPSTREAM: 'https://billing-service.example.test',
     TIMEOUT_MS: '2500',
   };
@@ -99,6 +100,21 @@ describe('runtime mode routing', () => {
 
     expect(response.headers.get('X-Upstream-Route')).toBe('cloud-run-serverless');
     expect(String(fetchMock.mock.calls[0][0])).toContain('billing-service.example.test');
+  });
+
+  it('proxies the Billing custom domain to billing-service without an Origin Rule', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('ready', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://billing-serverless.example.test/readyz'),
+      { ...baseEnv, RUNTIME_MODE: 'serverless' },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-Upstream-Route')).toBe('cloud-run-billing');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://billing-service.example.test/readyz');
   });
 
   it('uses content-service as the hybrid fallback for CMS reads', async () => {
