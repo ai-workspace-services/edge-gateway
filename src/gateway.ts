@@ -6,7 +6,9 @@ import {
   Env,
   failoverMethodsFromEnv,
   GatewayBoundary,
+  hasSessionCredential,
   isPublicPath,
+  looksLikeJWT,
   ownsPath,
 } from './config';
 import { verifyJWT } from './jwt';
@@ -67,22 +69,37 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
 
       if (!isPublic) {
         const authHeader = request.headers.get('Authorization');
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-          return jsonResponse(
-            { code: 401, error: 'Unauthorized: Missing or invalid Bearer token' },
-            401,
-          );
-        }
+        const bearer = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+        // A browser has no JWT: accounts signs users in with an opaque session
+        // token it stores server-side and hands back as a cookie, and it
+        // validates that token itself on every route (Authorization, ?token=,
+        // or the cookie). Rejecting those requests here made every signed-in
+        // browser call -- starting with /api/auth/session right after login --
+        // fail with "Missing or invalid Bearer token", regardless of whether
+        // the session was valid. Pass the credential through to the service
+        // that can actually resolve it; a forged one still gets a 401 there.
+        const upstreamValidatesCredential =
+          backendServiceForPath(url.pathname) === 'accounts' &&
+          (hasSessionCredential(request.headers.get('Cookie')) || (bearer !== '' && !looksLikeJWT(bearer)));
 
-        if (!env.JWT_SECRET) {
-          return jsonResponse({ code: 500, error: 'Gateway JWT secret is not configured' }, 500);
-        }
+        if (!upstreamValidatesCredential) {
+          if (!bearer) {
+            return jsonResponse(
+              { code: 401, error: 'Unauthorized: Missing or invalid Bearer token' },
+              401,
+            );
+          }
 
-        const result = await verifyJWT(authHeader.substring(7), env.JWT_SECRET);
-        if (!result.valid) {
-          return jsonResponse({ code: 401, error: `Unauthorized: ${result.error}` }, 401);
+          if (!env.JWT_SECRET) {
+            return jsonResponse({ code: 500, error: 'Gateway JWT secret is not configured' }, 500);
+          }
+
+          const result = await verifyJWT(bearer, env.JWT_SECRET);
+          if (!result.valid) {
+            return jsonResponse({ code: 401, error: `Unauthorized: ${result.error}` }, 401);
+          }
+          validatedUser = result.payload || null;
         }
-        validatedUser = result.payload || null;
       }
 
       const proxyHeaders = new Headers(request.headers);

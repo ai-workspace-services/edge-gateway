@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { backendServiceForPath, isPublicPath, ownsPath } from '../src/config';
+import {
+  backendServiceForPath,
+  hasSessionCredential,
+  isPublicPath,
+  looksLikeJWT,
+  ownsPath,
+} from '../src/config';
 
 describe('API boundary ownership', () => {
   it('assigns auth and legacy auth routes to the auth Worker', () => {
@@ -54,5 +60,24 @@ describe('API boundary ownership', () => {
     // Prefix matching must not leak a neighbouring path.
     expect(isPublicPath('/api/auth/mfa/status-report')).toBe(false);
     expect(isPublicPath('/api/auth/token/introspect')).toBe(false);
+  });
+});
+
+describe('browser session credentials', () => {
+  it('recognises the accounts session cookie among others', () => {
+    expect(hasSessionCredential('theme=dark; xc_session=abc123; locale=zh')).toBe(true);
+    expect(hasSessionCredential('xc_session=abc123')).toBe(true);
+    // An empty or absent cookie is not a credential.
+    expect(hasSessionCredential('xc_session=')).toBe(false);
+    expect(hasSessionCredential('theme=dark')).toBe(false);
+    expect(hasSessionCredential(null)).toBe(false);
+    // A different cookie must not match on prefix.
+    expect(hasSessionCredential('xc_session_backup=abc123')).toBe(false);
+  });
+
+  it('separates JWTs from the opaque session token accounts issues', () => {
+    expect(looksLikeJWT('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1In0.sig')).toBe(true);
+    expect(looksLikeJWT('7f3c1e9a4b8d2c6e5f0a1b2c3d4e5f60')).toBe(false);
+    expect(looksLikeJWT('')).toBe(false);
   });
 });

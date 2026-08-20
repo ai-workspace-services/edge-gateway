@@ -213,3 +213,78 @@ describe('runtime mode routing', () => {
     expect(response.headers.get('X-Upstream-Route')).toBe('selfhost-primary');
   });
 });
+
+describe('signed-in browser requests', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const env = {
+    RUNTIME_MODE: 'serverless' as const,
+    PRIMARY_UPSTREAM: 'https://vps.example.test',
+    FALLBACK_UPSTREAM: 'https://cloud-run.example.test',
+    BILLING_UPSTREAM: 'https://billing-service.example.test',
+    JWT_SECRET: 'test-secret-key-1234567890123456',
+  };
+  type Args = [input: Request | string | URL, init?: RequestInit];
+
+  const sessionRequest = (headers: Record<string, string> = {}) =>
+    new Request('https://console.example.test/api/auth/session', { headers });
+
+  it('lets the accounts session cookie through to accounts', async () => {
+    // The browser never holds a JWT: accounts signs it in with an opaque
+    // session token and validates that token itself. Refusing it here left
+    // every signed-in call 401 right after a successful login.
+    const fetchMock = vi.fn<Args, Promise<Response>>(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('auth').fetch(
+      sessionRequest({ Cookie: 'theme=dark; xc_session=opaque-session-token' }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('cloud-run.example.test');
+  });
+
+  it('still rejects a request that carries no credential at all', async () => {
+    const fetchMock = vi.fn<Args, Promise<Response>>(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('auth').fetch(sessionRequest(), env);
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('still verifies a presented JWT instead of trusting it', async () => {
+    const fetchMock = vi.fn<Args, Promise<Response>>(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('auth').fetch(
+      sessionRequest({ Authorization: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1In0.forged' }),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not extend the session credential to other backends', async () => {
+    // Only accounts can resolve the session token, so billing must keep
+    // demanding a verifiable JWT.
+    const fetchMock = vi.fn<Args, Promise<Response>>(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://console.example.test/api/v1/billing/subscriptions', {
+        headers: { Cookie: 'xc_session=opaque-session-token' },
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
