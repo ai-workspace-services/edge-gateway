@@ -89,6 +89,27 @@ function matchesPath(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
+// The browser credential accounts issues on sign-in. It is an opaque session
+// token looked up in the accounts session store, not a JWT, so only accounts
+// can validate it -- the gateway can merely recognise that one was presented.
+export const SESSION_COOKIE_NAME = 'xc_session';
+
+// A JWT is three base64url segments. Anything else presented as a Bearer token
+// is an opaque credential the gateway cannot verify -- accounts hands out its
+// session token that way as well.
+export function looksLikeJWT(token: string): boolean {
+  const parts = token.split('.');
+  return parts.length === 3 && parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part));
+}
+
+export function hasSessionCredential(cookieHeader: string | null): boolean {
+  if (!cookieHeader) return false;
+  return cookieHeader.split(';').some((entry) => {
+    const [name, ...rest] = entry.split('=');
+    return name.trim() === SESSION_COOKIE_NAME && rest.join('=').trim().length > 0;
+  });
+}
+
 export type BackendService = 'accounts' | 'content' | 'billing';
 
 export function backendServiceForPath(pathname: string): BackendService {
