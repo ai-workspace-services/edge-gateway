@@ -31,6 +31,7 @@ describe('runtime mode routing', () => {
     CONTENT_UPSTREAM: 'https://content-service.example.test',
     BILLING_HOST: 'billing-serverless.example.test',
     BILLING_UPSTREAM: 'https://billing-service.example.test',
+    INTERNAL_SERVICE_TOKEN: 'internal-token',
     TIMEOUT_MS: '2500',
   };
   type FetchArgs = [input: Request | string | URL, init?: RequestInit];
@@ -165,6 +166,41 @@ describe('runtime mode routing', () => {
 
     expect(response.headers.get('X-Upstream-Route')).toBe('cloud-run-serverless');
     expect(String(fetchMock.mock.calls[0][0])).toContain('billing-service.example.test');
+  });
+
+  it('allows the internal service token to reach Accounts internal APIs', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async (_input, init) => {
+      expect(new Headers(init?.headers).get('X-Service-Token')).toBe('internal-token');
+      return new Response('{"identities":[]}', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://accounts.example.test/api/internal/network/identities', {
+        headers: { 'X-Service-Token': 'internal-token' },
+      }),
+      { ...baseEnv, RUNTIME_MODE: 'serverless' },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-Upstream-Route')).toBe('cloud-run-serverless');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('cloud-run.example.test');
+  });
+
+  it('rejects an invalid internal service token before proxying', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://accounts.example.test/api/internal/network/identities', {
+        headers: { 'X-Service-Token': 'wrong-token' },
+      }),
+      { ...baseEnv, RUNTIME_MODE: 'serverless' },
+    );
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('proxies the Billing custom domain to billing-service without an Origin Rule', async () => {

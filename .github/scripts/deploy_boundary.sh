@@ -72,3 +72,8 @@ done < <(jq -r "${vars_filter} | to_entries[] | [.key, .value] | @tsv" "${CONFIG
 
 echo "==> [Wrangler] Deploying ${boundary_display_name} (${worker_name}) with routes: ${route_suffixes[*]}..."
 npx wrangler "${deploy_args[@]}"
+
+if [[ -n "${INTERNAL_SERVICE_TOKEN:-}" ]]; then
+  echo "==> [Wrangler] Updating INTERNAL_SERVICE_TOKEN for ${boundary} Worker..."
+  printf '%s' "${INTERNAL_SERVICE_TOKEN}" | npx wrangler secret put INTERNAL_SERVICE_TOKEN --name "${worker_name}"
+fi

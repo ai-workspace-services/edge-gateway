@@ -61,9 +61,12 @@ fi
 
 echo "==> [Deploy] Deploying edge-gateway API boundary Workers..."
 CONTENT_SERVICE_TOKEN=""
+INTERNAL_SERVICE_TOKEN=""
 if [[ -n "${VAULT_RESPONSE}" ]]; then
-  CONTENT_SERVICE_TOKEN=$(echo "${VAULT_RESPONSE}" | jq -r '.data.data.CONTENT_SERVICE_TOKEN // .data.data.INTERNAL_SERVICE_TOKEN // .data.CONTENT_SERVICE_TOKEN // .data.INTERNAL_SERVICE_TOKEN // empty')
+  CONTENT_SERVICE_TOKEN=$(echo "${VAULT_RESPONSE}" | jq -r '.data.data.CONTENT_SERVICE_TOKEN // .data.CONTENT_SERVICE_TOKEN // empty')
+  INTERNAL_SERVICE_TOKEN=$(echo "${VAULT_RESPONSE}" | jq -r '.data.data.INTERNAL_SERVICE_TOKEN // .data.INTERNAL_SERVICE_TOKEN // empty')
 fi
+export INTERNAL_SERVICE_TOKEN
 for boundary in auth admin core; do
   worker_name="$(jq -er --arg boundary "${boundary}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
   if [[ -n "${JWT_SECRET:-}" ]]; then
