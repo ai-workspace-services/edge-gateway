@@ -65,9 +65,14 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
 
       const isPublic =
         isPublicPath(url.pathname) || (isBillingCustomDomain && url.pathname === '/readyz');
+      const suppliedServiceToken = request.headers.get('X-Service-Token')?.trim();
+      const isInternalServiceRequest =
+        (url.pathname === '/api/internal' || url.pathname.startsWith('/api/internal/')) &&
+        Boolean(env.INTERNAL_SERVICE_TOKEN) &&
+        suppliedServiceToken === env.INTERNAL_SERVICE_TOKEN;
       let validatedUser: Record<string, any> | null = null;
 
-      if (!isPublic) {
+      if (!isPublic && !isInternalServiceRequest) {
         const authHeader = request.headers.get('Authorization');
         const bearer = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
         // A browser has no JWT: accounts signs users in with an opaque session
@@ -160,7 +165,9 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
       // supplied by a browser; inject the Vault-provided secret only for the
       // Git-backed content service.
       proxyHeaders.delete('X-Service-Token');
-      if (backendService === 'content' && env.CONTENT_SERVICE_TOKEN) {
+      if (isInternalServiceRequest && env.INTERNAL_SERVICE_TOKEN) {
+        proxyHeaders.set('X-Service-Token', env.INTERNAL_SERVICE_TOKEN);
+      } else if (backendService === 'content' && env.CONTENT_SERVICE_TOKEN) {
         proxyHeaders.set('X-Service-Token', env.CONTENT_SERVICE_TOKEN);
       }
 

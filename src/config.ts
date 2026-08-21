@@ -13,6 +13,7 @@ export interface Env {
   BILLING_HOST?: string;
   BILLING_UPSTREAM?: string;
   CONTENT_SERVICE_TOKEN?: string;
+  INTERNAL_SERVICE_TOKEN?: string;
   JWT_ISSUER?: string;
   JWT_SECRET?: string;
   TIMEOUT_MS?: string;
