@@ -74,6 +74,6 @@ echo "==> [Wrangler] Deploying ${boundary_display_name} (${worker_name}) with ro
 npx wrangler "${deploy_args[@]}"
 
 if [[ -n "${INTERNAL_SERVICE_TOKEN:-}" ]]; then
-  echo "==> [Wrangler] Updating INTERNAL_SERVICE_TOKEN for ${boundary} Worker..."
+  echo "==> [Wrangler] Updating INTERNAL_SERVICE_TOKEN for ${BOUNDARY} Worker..."
   printf '%s' "${INTERNAL_SERVICE_TOKEN}" | npx wrangler secret put INTERNAL_SERVICE_TOKEN --name "${worker_name}"
 fi
