@@ -36,6 +36,27 @@ describe('runtime mode routing', () => {
   };
   type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 
+  // billing-service paths are not public, so exercising the billing upstream
+  // needs a credential the gateway can verify itself (an opaque session token
+  // is only passed through for accounts-owned paths).
+  async function signJWT(payload: Record<string, unknown>, secret: string): Promise<string> {
+    const b64url = (value: string) =>
+      btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const encoder = new TextEncoder();
+    const head = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+    const body = b64url(JSON.stringify(payload));
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(`${head}.${body}`));
+    const signatureB64 = b64url(String.fromCharCode(...new Uint8Array(signature)));
+    return `${head}.${body}.${signatureB64}`;
+  }
+
   it('routes selfhost mode to the VPS primary only', async () => {
     const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('selfhost', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -159,13 +180,35 @@ describe('runtime mode routing', () => {
     const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('billing', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
+    const secret = 'test-secret-key-1234567890123456';
+    const token = await signJWT({ user_id: 'u-1' }, secret);
     const response = await createGatewayWorker('core').fetch(
-      new Request('https://accounts.example.test/api/v1/billing/plans'),
-      { ...baseEnv, RUNTIME_MODE: 'serverless' },
+      new Request('https://accounts.example.test/api/v1/billing/usage', {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { ...baseEnv, RUNTIME_MODE: 'serverless', JWT_SECRET: secret },
     );
 
     expect(response.headers.get('X-Upstream-Route')).toBe('cloud-run-serverless');
     expect(String(fetchMock.mock.calls[0][0])).toContain('billing-service.example.test');
+  });
+
+  it('routes the plan catalog to accounts, not billing-service', async () => {
+    // The catalog lives in accounts (r.GET("/api/billing/plans")). Sending it
+    // to billing-service returned a 404 from an upstream that never had the
+    // route, which read as a routing bug rather than a misclassification.
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async () => new Response('{"plans":[]}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('core').fetch(
+      new Request('https://accounts.example.test/api/billing/plans'),
+      { ...baseEnv, RUNTIME_MODE: 'serverless' },
+    );
+
+    expect(response.status).toBe(200);
+    const target = String(fetchMock.mock.calls[0][0]);
+    expect(target).toContain('cloud-run.example.test');
+    expect(target).not.toContain('billing-service.example.test');
   });
 
   it('allows the internal service token to reach Accounts internal APIs', async () => {

@@ -67,7 +67,14 @@ export const PUBLIC_PATHS = [
   '/api/v1/auth/oauth',
   '/api/v1/auth/mfa/status',
   '/api/v1/auth/token/exchange',
+  // Stripe presents no bearer and no session cookie: its identity is the
+  // Stripe-Signature header, which accounts verifies itself (verifyWebhook).
+  // A 401 here means no subscription event is ever delivered.
+  '/api/billing/stripe/webhook',
   '/api/v1/billing/stripe/webhook',
+  // Read by the pricing page before sign-in. A 401 does not surface as an
+  // error: the storefront renders every plan as "coming soon" instead.
+  '/api/billing/plans',
   '/api/v1/billing/plans',
   '/api/v1/blogs',
   '/api/v1/docs',
@@ -76,6 +83,18 @@ export const PUBLIC_PATHS = [
   '/api/v1/website',
   '/api/v1/health',
   '/healthz',
+];
+
+// Paths in the billing URL family that accounts serves, not billing-service.
+// billing-service only exposes /v1/jobs/*, /v1/ingest/* and health probes, so
+// anything sent there that it does not implement comes back as a 404 from an
+// upstream that never had the route -- which reads like a routing bug rather
+// than a misclassification.
+const ACCOUNTS_BILLING_PATHS = [
+  '/api/billing/stripe/webhook',
+  '/api/v1/billing/stripe/webhook',
+  '/api/billing/plans',
+  '/api/v1/billing/plans',
 ];
 
 const CONTENT_API_PATHS = [
@@ -88,6 +107,10 @@ const CONTENT_API_PATHS = [
 
 function matchesPath(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function matchesAnyPath(pathname: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((prefix) => matchesPath(pathname, prefix));
 }
 
 // The browser credential accounts issues on sign-in. It is an opaque session
@@ -118,13 +141,10 @@ export function backendServiceForPath(pathname: string): BackendService {
     return 'content';
   }
 
-  // Stripe webhooks are handled by accounts, even though they share the
-  // billing URL family. Other billing APIs belong to billing-service.
-  if (
-    (matchesPath(pathname, '/api/billing') || matchesPath(pathname, '/api/v1/billing')) &&
-    !matchesPath(pathname, '/api/billing/stripe/webhook') &&
-    !matchesPath(pathname, '/api/v1/billing/stripe/webhook')
-  ) {
+  if (matchesAnyPath(pathname, ACCOUNTS_BILLING_PATHS)) {
+    return 'accounts';
+  }
+  if (matchesPath(pathname, '/api/billing') || matchesPath(pathname, '/api/v1/billing')) {
     return 'billing';
   }
 
