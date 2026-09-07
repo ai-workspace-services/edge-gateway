@@ -76,6 +76,13 @@ export const PUBLIC_PATHS = [
   // error: the storefront renders every plan as "coming soon" instead.
   '/api/billing/plans',
   '/api/v1/billing/plans',
+  // XConnect machine enrollment starts without a user session. The one-time
+  // invite and XConnect-Device credential are validated by Accounts; neither
+  // is a user JWT that this edge worker can verify. Enrollment config and ACK
+  // remain outside this list because they carry an opaque Bearer credential
+  // that the existing Accounts pass-through handles.
+  '/api/overlay/v1/join-tokens/exchange',
+  '/api/overlay/v1/device/session',
   '/api/v1/blogs',
   '/api/v1/docs',
   '/api/v1/home',

@@ -70,6 +70,16 @@ describe('API boundary ownership', () => {
     expect(isPublicPath('/api/billing/stripe/webhook')).toBe(true);
   });
 
+  it('delegates XConnect machine enrollment credentials to Accounts', () => {
+    expect(isPublicPath('/api/overlay/v1/join-tokens/exchange')).toBe(true);
+    expect(isPublicPath('/api/overlay/v1/device/session')).toBe(true);
+    // Enrollment Bearers are already passed through as opaque Accounts
+    // credentials; user-scoped control-plane APIs must stay behind login.
+    expect(isPublicPath('/api/overlay/v1/enrollment/signed-config')).toBe(false);
+    expect(isPublicPath('/api/overlay/v1/signing-keys')).toBe(false);
+    expect(isPublicPath('/api/admin/xconnect-zero/networks')).toBe(false);
+  });
+
   it('pairs every public auth and billing path with its /api/v1 twin', () => {
     // The auth and billing families are served under both /api/x and
     // /api/v1/x. Every entry added to one form has so far been forgotten in
