@@ -32,6 +32,11 @@ function requestInit(request: Request, headers: Headers, signal?: AbortSignal): 
     method: request.method,
     headers,
     signal,
+    // OAuth login and callback endpoints intentionally return redirects. The
+    // gateway must relay the Location header to the browser instead of
+    // following the redirect inside the Worker and returning GitHub's HTML
+    // under the Accounts hostname.
+    redirect: 'manual',
   };
 
   if (request.method !== 'GET' && request.method !== 'HEAD') {

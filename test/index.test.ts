@@ -79,6 +79,27 @@ describe('runtime mode routing', () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain('cloud-run.example.test');
   });
 
+  it('preserves OAuth redirects from Accounts for the browser', async () => {
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async (_input, init) => {
+      expect(init?.redirect).toBe('manual');
+      return new Response(null, {
+        status: 307,
+        headers: { Location: 'https://github.com/login/oauth/authorize?client_id=test' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await createGatewayWorker('auth').fetch(
+      new Request('https://accounts.example.test/api/auth/oauth/login/github'),
+      { ...baseEnv, RUNTIME_MODE: 'serverless' },
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get('Location')).toBe(
+      'https://github.com/login/oauth/authorize?client_id=test',
+    );
+  });
+
   it('fails over from selfhost to Cloud Run only in hybrid mode', async () => {
     const fetchMock = vi
       .fn<FetchArgs, Promise<Response>>()
