@@ -24,7 +24,11 @@ if [[ "${runtime_mode}" == "selfhost" ]]; then
 fi
 worker_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
 boundary_display_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | (.display_name // .id)' "${CONFIG_FILE}")"
-mapfile -t route_suffixes < <(jq -er --arg boundary "${BOUNDARY}" '
+route_suffixes=()
+while IFS= read -r route_suffix; do
+  [[ -n "${route_suffix}" ]] || continue
+  route_suffixes+=("${route_suffix}")
+done < <(jq -er --arg boundary "${BOUNDARY}" '
   .spec.serverless.edge_gateway.boundaries[]
   | select(.id == $boundary)
   | (.routes // [.route])[]
@@ -35,17 +39,32 @@ if [[ "${#route_suffixes[@]}" -eq 0 ]]; then
 fi
 api_host="$(jq -er '.spec.serverless.accounts_host' "${CONFIG_FILE}")"
 
-# GitOps canonical aliases remain DNS CNAMEs to the mode-qualified host. The
-# Core Worker must also own the canonical API route so Cloudflare dispatches
-# the request by the original Host header instead of attempting to chain one
-# Worker Custom Domain through another CNAME.
+# GitOps canonical aliases remain DNS CNAMEs to the mode-qualified host, so
+# every Worker must also own its route on the canonical host: Cloudflare
+# dispatches by the original Host header rather than chaining one Worker Custom
+# Domain through another CNAME. Giving only Core the canonical route left
+# accounts.svc.plus/api/auth/* and /api/admin/* dispatching to Core, which
+# rejects paths it does not own with "Unknown API boundary: core" -- every
+# sign-in against the canonical host failed with a 404. Each boundary claims
+# its own suffixes here, so the more specific route still wins over Core's
+# /api/* on the same host.
 canonical_routes=()
-if [[ "${BOUNDARY}" == "core" ]]; then
-  while IFS=$'\t' read -r canonical_host canonical_target; do
-    [[ -n "${canonical_host}" && "${canonical_target}" == "${api_host}" ]] || continue
-    canonical_routes+=("${canonical_host}/api/*")
-  done < <(jq -r '.spec.runtime.routing.dns.canonical_records // {} | to_entries[] | [.key, .value] | @tsv' "${CONFIG_FILE}")
-fi
+while IFS=$'\t' read -r canonical_host canonical_target; do
+  [[ -n "${canonical_host}" && "${canonical_target}" == "${api_host}" ]] || continue
+  for route_suffix in "${route_suffixes[@]}"; do
+    canonical_routes+=("${canonical_host}${route_suffix}")
+  done
+done < <(jq -r '.spec.runtime.routing.dns.canonical_records // {} | to_entries[] | [.key, .value] | @tsv' "${CONFIG_FILE}")
+# Browser-facing Accounts aliases are Worker custom domains owned by the Core
+# boundary. Add the same boundary-specific routes on each alias so /api/auth/*
+# is dispatched to Auth instead of falling through to Core and returning
+# "Unknown API boundary: core".
+while IFS= read -r accounts_alias; do
+  [[ -n "${accounts_alias}" ]] || continue
+  for route_suffix in "${route_suffixes[@]}"; do
+    canonical_routes+=("${accounts_alias}${route_suffix}")
+  done
+done < <(jq -r '.spec.serverless.accounts_aliases[]? // empty' "${CONFIG_FILE}")
 
 vars_filter='(.spec.serverless.edge_gateway.defaults // {}) as $defaults | (.spec.serverless.cloud_run // {}) as $cloud_run | {RUNTIME_MODE: .spec.runtime.mode, PRIMARY_UPSTREAM: $defaults.primary_upstream, FALLBACK_UPSTREAM: $defaults.fallback_upstream, CONTENT_UPSTREAM: ($cloud_run.content_service // $defaults.content_upstream), BILLING_HOST: .spec.serverless.billing_host, BILLING_UPSTREAM: ($cloud_run.billing_service // $defaults.billing_upstream), JWT_ISSUER: $defaults.jwt_issuer, TIMEOUT_MS: $defaults.timeout_ms, FAILOVER_METHODS: ($defaults.failover_methods // [] | join(","))} | with_entries(select(.value != null and .value != ""))'
 
@@ -63,9 +82,13 @@ deploy_args=(
 for route_suffix in "${route_suffixes[@]}"; do
   deploy_args+=(--route "${api_host}${route_suffix}")
 done
-for route in "${canonical_routes[@]}"; do
-  deploy_args+=(--route "${route}")
-done
+# Guarded: an environment that declares no canonical alias leaves this array
+# empty, and older bash expands an empty array as unset under `set -u`.
+if [[ "${#canonical_routes[@]}" -gt 0 ]]; then
+  for route in "${canonical_routes[@]}"; do
+    deploy_args+=(--route "${route}")
+  done
+fi
 while IFS=$'\t' read -r key value; do
   deploy_args+=(--var "${key}:${value}")
 done < <(jq -r "${vars_filter} | to_entries[] | [.key, .value] | @tsv" "${CONFIG_FILE}")
