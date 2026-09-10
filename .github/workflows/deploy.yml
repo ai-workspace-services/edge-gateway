@@ -45,6 +45,17 @@ jobs:
       - name: Test
         run: npm test
 
+      # The deploy scripts carry their own contract tests (route fan-out, the
+      # transient-failure retry budget). Nothing ran them, so a regression in
+      # the deploy path only showed up during an actual rollout.
+      - name: Deploy script contract tests
+        run: |
+          set -euo pipefail
+          for test in .github/scripts/tests/*.sh; do
+            echo "==> ${test}"
+            bash "${test}"
+          done
+
   deploy:
     name: Deploy to Cloudflare Workers
     needs: ci

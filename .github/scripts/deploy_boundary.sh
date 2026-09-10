@@ -93,10 +93,64 @@ while IFS=$'\t' read -r key value; do
   deploy_args+=(--var "${key}:${value}")
 done < <(jq -r "${vars_filter} | to_entries[] | [.key, .value] | @tsv" "${CONFIG_FILE}")
 
+# Cloudflare's API intermittently answers a deploy from its own edge with a 5xx
+# ("Received a malformed response from the API" / "upstream connect error"),
+# after the bundle has already uploaded. `wrangler deploy` is idempotent, so the
+# useful response to that is another attempt rather than a failed rollout that
+# also blocks every downstream job.
+#
+# Only transient upstream markers are retried. A 4xx, a bad binding or a config
+# mistake still fails on the first attempt: retrying those would turn a real
+# break into a slow mystery instead of surfacing it.
+WRANGLER_MAX_ATTEMPTS="${WRANGLER_MAX_ATTEMPTS:-3}"
+WRANGLER_RETRY_DELAY_SECONDS="${WRANGLER_RETRY_DELAY_SECONDS:-5}"
+
+is_transient_api_failure() {
+  grep -qiE \
+    'received a malformed response from the api|upstream connect error|reset before headers|-> 5[0-9]{2} |service unavailable|bad gateway|gateway timeout|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up' \
+    <<<"$1"
+}
+
+run_wrangler_with_retry() {
+  local description="$1"
+  shift
+  local attempt=1
+  local delay="${WRANGLER_RETRY_DELAY_SECONDS}"
+  local output status
+
+  while true; do
+    set +e
+    output="$("$@" 2>&1)"
+    status=$?
+    set -e
+    printf '%s\n' "${output}"
+
+    if [[ ${status} -eq 0 ]]; then
+      return 0
+    fi
+    if (( attempt >= WRANGLER_MAX_ATTEMPTS )) || ! is_transient_api_failure "${output}"; then
+      return "${status}"
+    fi
+
+    echo "==> [Wrangler] ${description} hit a transient Cloudflare API failure (attempt ${attempt}/${WRANGLER_MAX_ATTEMPTS}); retrying in ${delay}s..." >&2
+    sleep "${delay}"
+    attempt=$(( attempt + 1 ))
+    delay=$(( delay * 2 ))
+  done
+}
+
+wrangler_deploy() {
+  npx wrangler "$@"
+}
+
+wrangler_put_internal_service_token() {
+  printf '%s' "${INTERNAL_SERVICE_TOKEN}" | npx wrangler secret put INTERNAL_SERVICE_TOKEN --name "$1"
+}
+
 echo "==> [Wrangler] Deploying ${boundary_display_name} (${worker_name}) with routes: ${route_suffixes[*]}..."
-npx wrangler "${deploy_args[@]}"
+run_wrangler_with_retry "${boundary_display_name} deploy" wrangler_deploy "${deploy_args[@]}"
 
 if [[ -n "${INTERNAL_SERVICE_TOKEN:-}" ]]; then
   echo "==> [Wrangler] Updating INTERNAL_SERVICE_TOKEN for ${BOUNDARY} Worker..."
-  printf '%s' "${INTERNAL_SERVICE_TOKEN}" | npx wrangler secret put INTERNAL_SERVICE_TOKEN --name "${worker_name}"
+  run_wrangler_with_retry "INTERNAL_SERVICE_TOKEN update" wrangler_put_internal_service_token "${worker_name}"
 fi
