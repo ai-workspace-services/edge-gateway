@@ -59,6 +59,11 @@ export const PUBLIC_PATHS = [
   '/api/auth/mfa/status',
   // Trades an OAuth callback code for a session; there is no session yet.
   '/api/auth/token/exchange',
+  // Password recovery starts before sign-in. Keep only the three recovery
+  // endpoints public; MFA reset and other account-management routes stay gated.
+  '/api/auth/password/forgot',
+  '/api/auth/password/forgot/send-code',
+  '/api/auth/password/forgot/confirm-code',
   '/api/v1/auth/login',
   '/api/v1/auth/register',
   '/api/v1/auth/verify-code',
@@ -67,6 +72,9 @@ export const PUBLIC_PATHS = [
   '/api/v1/auth/oauth',
   '/api/v1/auth/mfa/status',
   '/api/v1/auth/token/exchange',
+  '/api/v1/auth/password/forgot',
+  '/api/v1/auth/password/forgot/send-code',
+  '/api/v1/auth/password/forgot/confirm-code',
   // Stripe presents no bearer and no session cookie: its identity is the
   // Stripe-Signature header, which accounts verifies itself (verifyWebhook).
   // A 401 here means no subscription event is ever delivered.
@@ -91,6 +99,15 @@ export const PUBLIC_PATHS = [
   '/api/v1/health',
   '/healthz',
 ];
+
+const EXACT_PUBLIC_PATHS = new Set([
+  '/api/auth/password/forgot',
+  '/api/auth/password/forgot/send-code',
+  '/api/auth/password/forgot/confirm-code',
+  '/api/v1/auth/password/forgot',
+  '/api/v1/auth/password/forgot/send-code',
+  '/api/v1/auth/password/forgot/confirm-code',
+]);
 
 // Paths in the billing URL family that accounts serves, not billing-service.
 // billing-service only exposes /v1/jobs/*, /v1/ingest/* and health probes, so
@@ -159,7 +176,10 @@ export function backendServiceForPath(pathname: string): BackendService {
 }
 
 export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some((path) => matchesPath(pathname, path));
+  if (EXACT_PUBLIC_PATHS.has(pathname)) return true;
+  return PUBLIC_PATHS.some(
+    (path) => !EXACT_PUBLIC_PATHS.has(path) && matchesPath(pathname, path),
+  );
 }
 
 export function ownsPath(pathname: string, boundary: GatewayBoundary): boolean {
