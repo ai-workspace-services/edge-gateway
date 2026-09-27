@@ -60,6 +60,24 @@ describe('API boundary ownership', () => {
     expect(isPublicPath('/api/v1/auth/token/exchange')).toBe(true);
   });
 
+  it('allows only the anonymous password recovery endpoints', () => {
+    const recoveryPaths = [
+      '/api/auth/password/forgot',
+      '/api/auth/password/forgot/send-code',
+      '/api/auth/password/forgot/confirm-code',
+      '/api/v1/auth/password/forgot',
+      '/api/v1/auth/password/forgot/send-code',
+      '/api/v1/auth/password/forgot/confirm-code',
+    ];
+    for (const path of recoveryPaths) expect(isPublicPath(path)).toBe(true);
+
+    expect(isPublicPath('/api/auth/password/reset/mfa')).toBe(false);
+    expect(isPublicPath('/api/v1/auth/password/reset/mfa')).toBe(false);
+    expect(isPublicPath('/api/auth/password/forgotten')).toBe(false);
+    expect(isPublicPath('/api/auth/password/forgot/confirm-code/other')).toBe(false);
+    expect(isPublicPath('/api/v1/auth/password/forgot/send-code/other')).toBe(false);
+  });
+
   it('allows the storefront catalog and the Stripe webhook without a session', () => {
     // The pricing page reads the catalog while the visitor is still anonymous;
     // a 401 here renders every plan as "coming soon" with no error surfaced.

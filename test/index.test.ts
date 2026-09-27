@@ -100,6 +100,46 @@ describe('runtime mode routing', () => {
     );
   });
 
+  it('forwards known and unknown password recovery emails to Accounts without a session', async () => {
+    const requestedEmails = ['known@example.test', 'unknown@example.test'];
+    const recoveryPaths = [
+      '/api/auth/password/forgot/send-code',
+      '/api/v1/auth/password/forgot/send-code',
+    ];
+    const forwardedBodies: unknown[] = [];
+    const fetchMock = vi.fn<FetchArgs, Promise<Response>>(async (input, init) => {
+      expect(new URL(String(input)).origin).toBe('https://cloud-run.example.test');
+      expect(new Headers(init?.headers).has('Authorization')).toBe(false);
+      forwardedBodies.push(JSON.parse(await new Response(init?.body).text()));
+      return new Response('{"message":"If the account exists, a code was sent."}', {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    for (const path of recoveryPaths) {
+      for (const email of requestedEmails) {
+        const response = await createGatewayWorker('auth').fetch(
+          new Request(`https://accounts.example.test${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          }),
+          { ...baseEnv, RUNTIME_MODE: 'serverless' },
+        );
+
+        expect(response.status).toBe(202);
+        expect(fetchMock).toHaveBeenCalledTimes(
+          recoveryPaths.indexOf(path) * requestedEmails.length + requestedEmails.indexOf(email) + 1,
+        );
+      }
+    }
+    expect(forwardedBodies).toEqual(
+      recoveryPaths.flatMap(() => requestedEmails.map((email) => ({ email }))),
+    );
+  });
+
   it('fails over from selfhost to Cloud Run only in hybrid mode', async () => {
     const fetchMock = vi
       .fn<FetchArgs, Promise<Response>>()
