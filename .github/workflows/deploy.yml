@@ -178,7 +178,7 @@ jobs:
           EDGE_GATEWAY_CONFIG_FILE: ${{ runner.temp }}/routing/edge-routing.json
           GATEWAY_REVISION: ${{ github.sha }}
       - name: Reconcile API CNAME and qualified domains in the IaC owner
-        uses: ai-workspace-infra/iac_modules/.github/actions/cloudflare-api-aliases@c1636fa7dd99f7be99145f71c78fe9459ae2b6ee
+        uses: ai-workspace-infra/iac_modules/.github/actions/cloudflare-api-aliases@a7ac40fb0c3e620bdec89edd72b172afefc1f2ee
         with:
           config_file: ${{ runner.temp }}/routing/edge-routing.json
           gateway_revision: ${{ github.sha }}
