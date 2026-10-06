@@ -21,14 +21,6 @@ jq -e --arg mode "${RUNTIME_MODE}" \
   exit 2
 }
 
-# Selfhost DNS points directly at the VPS Full Stack. There is deliberately no
-# edge-gateway Worker in this mode, so no Vault or Cloudflare credentials are
-# needed for this repository's deployment job.
-if [[ "${RUNTIME_MODE}" == "selfhost" ]]; then
-  echo "==> [Deploy] Selfhost mode selected; edge-gateway deployment is not required."
-  exit 0
-fi
-
 echo "==> [Vault] Fetching secrets from ${VAULT_ADDR} (${VAULT_SECRETS_PATH})..."
 
 if [[ -z "${VAULT_TOKEN:-}" ]]; then
@@ -42,7 +34,8 @@ VAULT_RESPONSE=$(curl -fsSL \
   "${VAULT_ADDR}/v1/${VAULT_SECRETS_PATH}" || true)
 
 if [[ -z "${VAULT_RESPONSE}" ]]; then
-  echo "Warning: Unable to fetch secrets from Vault or secret path is empty, checking fallback environment variables..."
+  echo "Vault routing credentials unavailable; deployment refused." >&2
+  exit 1
 else
   # 提取 JWT_SECRET
   JWT_SECRET=$(echo "${VAULT_RESPONSE}" | jq -r '.data.data.JWT_SECRET // .data.JWT_SECRET // empty')

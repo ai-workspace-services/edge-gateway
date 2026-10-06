@@ -1,0 +1,23 @@
+{
+  "role_type": "jwt",
+  "bound_audiences": [
+    "vault"
+  ],
+  "bound_claims_type": "glob",
+  "bound_claims": {
+    "repository": "ai-workspace-services/edge-gateway",
+    "environment": "production",
+    "ref": [
+      "refs/heads/main",
+      "refs/tags/v*"
+    ],
+    "job_workflow_ref": "ai-workspace-services/edge-gateway/.github/workflows/deploy.yml@*"
+  },
+  "user_claim": "repository",
+  "token_policies": [
+    "github-actions-edge-gateway-prod"
+  ],
+  "token_no_default_policy": true,
+  "token_ttl": "15m",
+  "token_max_ttl": "15m"
+}

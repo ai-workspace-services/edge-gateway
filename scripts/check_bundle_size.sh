@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Keep every executable Worker bundle strictly below 3 MiB.
 MAX_BYTES=$((3 * 1024 * 1024))
+MAX_GZIP_BYTES=$((1024 * 1024))
 BUNDLE_DIR="$(mktemp -d /tmp/edge-gateway-bundles.XXXXXX)"
 trap 'rm -rf "${BUNDLE_DIR}"' EXIT
 
@@ -25,13 +26,15 @@ check_boundary() {
   fi
 
   local size_bytes
+  local gzip_bytes
   size_bytes="$(wc -c < "${bundle}" | tr -d '[:space:]')"
-  if (( size_bytes >= MAX_BYTES )); then
+  gzip_bytes="$(gzip -c "${bundle}" | wc -c | tr -d '[:space:]')"
+  if (( size_bytes >= MAX_BYTES || gzip_bytes >= MAX_GZIP_BYTES )); then
     echo "[bundle-size] ${boundary}: ${size_bytes} bytes (limit: < ${MAX_BYTES})" >&2
     exit 1
   fi
 
-  echo "[bundle-size] ${boundary}: ${size_bytes} bytes (< ${MAX_BYTES})"
+  echo "[bundle-size] ${boundary}: ${size_bytes} bytes; gzip ${gzip_bytes} bytes (< ${MAX_GZIP_BYTES})"
 }
 
 for boundary in auth admin core; do

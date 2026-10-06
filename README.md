@@ -3,7 +3,7 @@
 > **Cloudflare Worker 智能边缘网关与流量调度器**  
 > 统一域名接入 · 边缘 JWT 验签 · GTM 实时故障转移 · CORS 跨域秒回 · 统一密钥拉取自 `vault.svc.plus`
 
-Edge Gateway 是一个超轻量级的专属应用网关：核心 handler 基于标准 Fetch API 和 Web Crypto，可运行在 Cloudflare Worker，也可嵌入 Node.js 20+ 或 Deno 1.37+；每个 Worker 可执行 bundle 严格小于 `3 MiB`。完整的架构、运行时兼容性、Git-backed CMS、环境变量和部署说明见 [`docs/edge-gateway.md`](docs/edge-gateway.md)。
+Edge Gateway 是一个超轻量级的专属应用网关：核心 handler 基于标准 Fetch API 和 Web Crypto，可运行在 Cloudflare Worker，也可嵌入 Node.js 20+ 或 Deno 1.37+；每个 Worker 压缩后 bundle 严格小于 `1 MiB`。完整的架构、运行时兼容性、Git-backed CMS、环境变量和部署说明见 [`docs/edge-gateway.md`](docs/edge-gateway.md)。
 
 ---
 
@@ -22,7 +22,7 @@ graph TD
     end
 
     subgraph 三种运行模式
-    C5 -->|selfhost: DNS 直达| VPS[主节点: VPS Full Stack]
+    C5 -->|selfhost: Worker 选择主机| VPS[主节点: VPS Full Stack]
     C5 -->|serverless| CloudRun[Cloud Run<br/>• accounts / content-service / billing-service]
     C5 -->|hybrid: selfhost 超时/5xx| CloudRun
     end
@@ -101,9 +101,9 @@ npm run typecheck
 * `topology/uat/serverless/runtime-topology.yaml`
 * `topology/uat/hybrid/runtime-topology.yaml`
 
-`selfhost` 由 DNS 直接指向 VPS Full Stack，因此不部署 edge-gateway Worker；只有
-`serverless` 与 `hybrid` 部署三个 API boundary Workers。每次部署只能消费与
-`spec.runtime.mode` 一致的声明。
+三种模式都保留 API boundary Workers；`selfhost` 只访问主机，`serverless` 只访问 Cloud Run，
+`hybrid` 优先访问主机，超时或 5xx 时仅允许 GET/HEAD/OPTIONS 回退。POST/PUT/PATCH/DELETE
+不会跨数据库重试。Accounts 和 Billing 使用同一个运行模式及各自上游。
 
 ---
 
@@ -131,3 +131,39 @@ npm run typecheck
   * `X-Upstream-Route: selfhost-primary`（Selfhost 或 hybrid 的主节点响应）
   * `X-Upstream-Route: cloud-run-serverless`（serverless 模式直达 Cloud Run）
   * `X-Upstream-Route: cloud-run-fallback`（hybrid 模式 selfhost 故障时由 Cloud Run 响应）
+
+## 发布时覆盖与生产入口
+
+手动触发 `deploy.yml`，`deploy=false` 生成不读取凭据的路由计划；`deploy=true` 发布并验证入口。
+
+| 输入 | 用途 |
+|---|---|
+| `environment` | `prod` / `uat` |
+| `runtime_mode` | `gitops` / `serverless` / `selfhost` / `hybrid` |
+| `primary_upstream`, `fallback_upstream` | Accounts 两个独立 HTTPS origin |
+| `billing_primary_upstream`, `billing_fallback_upstream` | Billing 两个独立 HTTPS origin |
+| `timeout_ms` | 默认 2500；覆盖范围 100–10000 |
+| `gitops_ref` | 已审查 GitOps commit SHA；Worker 名称、入口和路由取自声明 |
+| `cutover_run_id` | 改变数据库写入入口时必须提供完整业务核对回执 |
+
+切换回执由 Toolkit 成功的数据操作流水线产生，绑定环境、准确上游、52 个业务表行数和
+按 email 对齐的摘要、用户数量、PROD Proxy UUID、最新原生 schema 及单写者隔离窗口。
+身份域单独导入或只有来源侧摘要不会放行。审批后再次检查回执时效。
+当前回执生产器尚未注册，改变数据库写入入口会被拒绝；不改变上游的 Serverless 部署可验证路由。
+发布前还读取实际 Worker 绑定；从 Selfhost 返回 Serverless 同样需要完整业务回执。
+单向 Supabase → Selfhost 复制不能持续保证旧库跟随 Selfhost 新写入，PROD 的 Accounts/Billing
+读回退默认禁用；注册并验收持续副本合同后才能启用。UAT 和独立 Content 读回退保留安全方法限制。
+
+PROD 的稳定入口由 GitOps 声明：`accounts.svc.plus`、`billing.svc.plus` 用 CNAME 选择
+`*-serverless-prod.svc.plus` / `*-selfhost-prod.svc.plus`，同时保留明确的 Worker Routes。
+CNAME 的原始 Host 需要自己的 Worker Route，不能靠目标域名继承 Worker 绑定。
+DNS / Worker domain 资源由 IaC owner 执行，网关发布只改变代码和上游配置。
+
+`xworktech.com` 保持品牌审核主页，`console.svc.plus` 保持控制台主页。Pages 静态资源直接
+由 CDN 服务；Edge Gateway 只承担 API 路由，不把品牌页面或静态资源纳入 Accounts/Billing 切换。
+Cloudflare Free 的 100,000 次/日是账户 Workers/Functions 共享配额，静态 Pages 请求不调用
+Functions 时不计入该配额（[官方说明](https://developers.cloudflare.com/pages/functions/pricing/)）。
+
+密钥按环境存放在 `secret/data/edge-gateway/{prod,uat}`，通过 GitHub OIDC 和各环境独立
+Vault role 读取。上游参数禁止密码、查询参数和网关自身域名，避免凭据落入输入或递归调用。
+发布后检查 Accounts 公开计划接口、认证入口、Billing readiness，以及路由、模式和 commit 响应头。
