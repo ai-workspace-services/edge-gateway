@@ -18,9 +18,9 @@ jq -e '.kind == "EdgeRoutingConfig" and .metadata.mode == .spec.runtime.mode and
   exit 2
 }
 runtime_mode="$(jq -er '.spec.runtime.mode' "${CONFIG_FILE}")"
-if [[ "${runtime_mode}" == "selfhost" ]]; then
-  echo "==> [Deploy] Selfhost mode selected; boundary ${BOUNDARY} is intentionally not deployed."
-  exit 0
+business_read_failover=enabled
+if [[ "$(jq -r '.metadata.environment // empty' "${CONFIG_FILE}")" == prod ]]; then
+  business_read_failover=disabled
 fi
 worker_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | .worker_name' "${CONFIG_FILE}")"
 boundary_display_name="$(jq -er --arg boundary "${BOUNDARY}" '.spec.serverless.edge_gateway.boundaries[] | select(.id == $boundary) | (.display_name // .id)' "${CONFIG_FILE}")"
@@ -38,6 +38,7 @@ if [[ "${#route_suffixes[@]}" -eq 0 ]]; then
   exit 2
 fi
 api_host="$(jq -er '.spec.serverless.accounts_host' "${CONFIG_FILE}")"
+billing_host="$(jq -r '.spec.serverless.billing_serverless_host // .spec.serverless.billing_host // empty' "${CONFIG_FILE}")"
 
 # GitOps canonical aliases remain DNS CNAMEs to the mode-qualified host, so
 # every Worker must also own its route on the canonical host: Cloudflare
@@ -50,7 +51,11 @@ api_host="$(jq -er '.spec.serverless.accounts_host' "${CONFIG_FILE}")"
 # /api/* on the same host.
 canonical_routes=()
 while IFS=$'\t' read -r canonical_host canonical_target; do
-  [[ -n "${canonical_host}" && "${canonical_target}" == "${api_host}" ]] || continue
+  [[ -n "${canonical_host}" ]] || continue
+  if [[ "${canonical_target}" != "${api_host}" ]]; then
+    jq -e --arg host "${canonical_host}" --arg target "${api_host}" \
+      '.spec.domains[$host].serverless == $target' "${CONFIG_FILE}" >/dev/null || continue
+  fi
   for route_suffix in "${route_suffixes[@]}"; do
     canonical_routes+=("${canonical_host}${route_suffix}")
   done
@@ -66,7 +71,14 @@ while IFS= read -r accounts_alias; do
   done
 done < <(jq -r '.spec.serverless.accounts_aliases[]? // empty' "${CONFIG_FILE}")
 
-vars_filter='(.spec.serverless.edge_gateway.defaults // {}) as $defaults | (.spec.serverless.cloud_run // {}) as $cloud_run | {RUNTIME_MODE: .spec.runtime.mode, PRIMARY_UPSTREAM: $defaults.primary_upstream, FALLBACK_UPSTREAM: $defaults.fallback_upstream, CONTENT_UPSTREAM: ($cloud_run.content_service // $defaults.content_upstream), BILLING_HOST: .spec.serverless.billing_host, BILLING_UPSTREAM: ($cloud_run.billing_service // $defaults.billing_upstream), JWT_ISSUER: $defaults.jwt_issuer, TIMEOUT_MS: $defaults.timeout_ms, FAILOVER_METHODS: ($defaults.failover_methods // [] | join(","))} | with_entries(select(.value != null and .value != ""))'
+if [[ "${BOUNDARY}" == core ]]; then
+  while IFS= read -r billing_alias; do
+    [[ -n "${billing_alias}" ]] || continue
+    canonical_routes+=("${billing_alias}/*")
+  done < <(jq -r --arg billing_host "${billing_host}" '.spec.serverless as $serverless | [$billing_host, $serverless.billing_host, ($serverless.billing_aliases[]?), (.spec.domains // {} | to_entries[] | select(.value.serverless == $billing_host) | .key)] | map(select(. != null and . != "")) | unique[]' "${CONFIG_FILE}")
+fi
+
+vars_filter='(.spec.serverless.edge_gateway.defaults // {}) as $defaults | (.spec.serverless.cloud_run // {}) as $cloud_run | .spec.serverless as $serverless | ($serverless.billing_serverless_host // $serverless.billing_host) as $billing_host | {RUNTIME_MODE: .spec.runtime.mode, PRIMARY_UPSTREAM: $defaults.primary_upstream, FALLBACK_UPSTREAM: $defaults.fallback_upstream, CONTENT_UPSTREAM: ($cloud_run.content_service // $defaults.content_upstream), BILLING_HOST: $billing_host, BILLING_ALIASES: ([$serverless.billing_host, $serverless.billing_aliases[]?, (.spec.domains // {} | to_entries[] | select(.value.serverless == $billing_host) | .key)] | unique | join(",")), BILLING_UPSTREAM: ($defaults.billing_fallback_upstream // $cloud_run.billing_service // $defaults.billing_upstream), BILLING_PRIMARY_UPSTREAM: $defaults.billing_primary_upstream, BILLING_FALLBACK_UPSTREAM: ($defaults.billing_fallback_upstream // $cloud_run.billing_service // $defaults.billing_upstream), JWT_ISSUER: $defaults.jwt_issuer, TIMEOUT_MS: $defaults.timeout_ms, FAILOVER_METHODS: ($defaults.failover_methods // ["GET","HEAD","OPTIONS"] | join(","))} | with_entries(select(.value != null and .value != ""))'
 
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required" >&2
@@ -82,6 +94,7 @@ deploy_args=(
 for route_suffix in "${route_suffixes[@]}"; do
   deploy_args+=(--route "${api_host}${route_suffix}")
 done
+deploy_args+=(--var "BUSINESS_READ_FAILOVER:${business_read_failover}")
 # Guarded: an environment that declares no canonical alias leaves this array
 # empty, and older bash expands an empty array as unset under `set -u`.
 if [[ "${#canonical_routes[@]}" -gt 0 ]]; then
@@ -92,6 +105,9 @@ fi
 while IFS=$'\t' read -r key value; do
   deploy_args+=(--var "${key}:${value}")
 done < <(jq -r "${vars_filter} | to_entries[] | [.key, .value] | @tsv" "${CONFIG_FILE}")
+if [[ -n "${GATEWAY_REVISION:-}" ]]; then
+  deploy_args+=(--var "GATEWAY_REVISION:${GATEWAY_REVISION}")
+fi
 
 # Cloudflare's API intermittently answers a deploy from its own edge with a 5xx
 # ("Received a malformed response from the API" / "upstream connect error"),

@@ -2,86 +2,189 @@ name: Edge Gateway CI and Deploy
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
   push:
-    branches:
-      - main
-    tags:
-      - '*'
+    branches: [main]
+    tags: ['*']
   workflow_dispatch:
     inputs:
       deploy:
-        description: 'Deploy after CI (reserved for explicitly approved operations)'
+        description: 'Deploy and verify public entries; false renders a plan without credentials'
         required: false
         default: false
         type: boolean
+      environment:
+        description: 'Routing environment'
+        required: true
+        default: prod
+        type: choice
+        options: [prod, uat]
+      runtime_mode:
+        description: 'Override routing mode; database writer changes require cutover evidence'
+        default: gitops
+        type: choice
+        options: [gitops, serverless, selfhost, hybrid]
+      primary_upstream:
+        description: 'Optional Accounts Selfhost HTTPS origin'
+        type: string
+      fallback_upstream:
+        description: 'Optional Accounts Serverless HTTPS origin'
+        type: string
+      billing_primary_upstream:
+        description: 'Optional Billing Selfhost HTTPS origin'
+        type: string
+      billing_fallback_upstream:
+        description: 'Optional Billing Serverless HTTPS origin'
+        type: string
+      timeout_ms:
+        description: 'Primary timeout override (100..10000 ms; default 2500)'
+        type: string
+      gitops_ref:
+        description: 'Reviewed immutable GitOps commit SHA'
+        required: true
+        default: f95197ef8e8078748f0b8471f9fe9aabd47cc0b7
+        type: string
+      cutover_run_id:
+        description: 'Trusted full business consistency and single writer receipt run ID'
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-
+          cache: npm
       - name: Install Dependencies
         run: npm ci
-
       - name: Typecheck
         run: npm run typecheck
-
       - name: Check Worker Bundle Size
         run: npm run check:bundle-size
-
       - name: Test
         run: npm test
+      - name: Verify dispatch and full business cutover contracts
+        run: .github/scripts/run_contract_tests.sh
 
-      # The deploy scripts carry their own contract tests (route fan-out, the
-      # transient-failure retry budget). Nothing ran them, so a regression in
-      # the deploy path only showed up during an actual rollout.
-      - name: Deploy script contract tests
-        run: |
-          set -euo pipefail
-          for test in .github/scripts/tests/*.sh; do
-            echo "==> ${test}"
-            bash "${test}"
-          done
-
-  deploy:
-    name: Deploy to Cloudflare Workers
+  routing:
+    name: Render routing plan
     needs: ci
-    # Snapshot and release tags carry no deployment input, so they run CI only.
-    # Production deployment is normally controlled by platform-ops-toolkit.
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy }}
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
     steps:
-      - name: Checkout Code
+      - uses: actions/checkout@v4
+      - name: Checkout reviewed GitOps declaration
         uses: actions/checkout@v4
+        with:
+          repository: ai-workspace-infra/gitops
+          ref: ${{ inputs.gitops_ref }}
+          path: gitops
+      - name: Render nonsecret dispatch overrides
+        run: .github/scripts/prepare_dispatch.sh
+        env:
+          DEPLOY_ENV: ${{ inputs.environment }}
+          GITOPS_DIR: ${{ github.workspace }}/gitops
+          GITOPS_REF: ${{ inputs.gitops_ref }}
+          EDGE_GATEWAY_CONFIG_FILE: ${{ runner.temp }}/edge-routing.json
+          INPUT_RUNTIME_MODE: ${{ inputs.runtime_mode }}
+          INPUT_PRIMARY_UPSTREAM: ${{ inputs.primary_upstream }}
+          INPUT_FALLBACK_UPSTREAM: ${{ inputs.fallback_upstream }}
+          INPUT_BILLING_PRIMARY_UPSTREAM: ${{ inputs.billing_primary_upstream }}
+          INPUT_BILLING_FALLBACK_UPSTREAM: ${{ inputs.billing_fallback_upstream }}
+          INPUT_TIMEOUT_MS: ${{ inputs.timeout_ms }}
+      - name: Require full business equality before changing a writer
+        if: inputs.deploy
+        run: .github/scripts/verify_cutover.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EDGE_GATEWAY_CONFIG_FILE: ${{ runner.temp }}/edge-routing.json
+          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+      - name: Save reviewed routing plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-routing-${{ github.run_id }}
+          path: ${{ runner.temp }}/edge-routing.json
+          retention-days: 7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+  deploy:
+    name: Deploy and verify Accounts + Billing
+    needs: routing
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy
+    environment: ${{ inputs.environment == 'prod' && 'production' || 'uat' }}
+    concurrency:
+      group: edge-gateway-${{ inputs.environment }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require reviewed deployment source and environment protection
+        run: .github/scripts/validate_release_source.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: edge-routing-${{ github.run_id }}
+          path: ${{ runner.temp }}/routing
+      - name: Recheck fresh cutover evidence after approval
+        run: .github/scripts/verify_cutover.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EDGE_GATEWAY_CONFIG_FILE: ${{ runner.temp }}/routing/edge-routing.json
+          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-
-      - name: Install Dependencies
-        run: npm ci
-
-      - name: Run Deploy Script with Vault Secrets
-        run: ./.github/scripts/deploy.sh
+          cache: npm
+      - run: npm ci
+      - name: Authenticate to scoped Vault role with GitHub OIDC
+        id: vault
+        uses: hashicorp/vault-action@v4
+        with:
+          url: ${{ vars.VAULT_ADDR || 'https://vault.svc.plus' }}
+          method: jwt
+          role: github-actions-edge-gateway-${{ inputs.environment }}
+          jwtGithubAudience: vault
+          exportToken: true
+          secrets: |
+            secret/data/edge-gateway/${{ inputs.environment }} CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
+            secret/data/edge-gateway/${{ inputs.environment }} CLOUDFLARE_ACCOUNT_ID | CLOUDFLARE_ACCOUNT_ID
+      - name: Require live writer equality before any gateway mutation
+        run: .github/scripts/require_live_cutover.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EDGE_GATEWAY_CONFIG_FILE: ${{ runner.temp }}/routing/edge-routing.json
+          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+      - name: Deploy three Workers with Vault runtime secrets
+        run: .github/scripts/deploy.sh
         env:
           VAULT_ADDR: ${{ vars.VAULT_ADDR || 'https://vault.svc.plus' }}
-          VAULT_TOKEN: ${{ secrets.VAULT_TOKEN }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VAULT_SECRETS_PATH: secret/data/edge-gateway/${{ inputs.environment }}
+          EDGE_GATEWAY_CONFIG_FILE: ${{ runner.temp }}/routing/edge-routing.json
+          GATEWAY_REVISION: ${{ github.sha }}
+      - name: Reconcile API CNAME and qualified domains in the IaC owner
+        uses: ai-workspace-infra/iac_modules/.github/actions/cloudflare-api-aliases@c1636fa7dd99f7be99145f71c78fe9459ae2b6ee
+        with:
+          config_file: ${{ runner.temp }}/routing/edge-routing.json
+          gateway_revision: ${{ github.sha }}
+          checkpoint_path: ${{ runner.temp }}/edge-api-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}.json
+      - name: Verify public Accounts and Billing entries
+        run: .github/scripts/verify_entrypoints.sh
+        env:
+          EDGE_GATEWAY_CONFIG_FILE: ${{ runner.temp }}/routing/edge-routing.json
+          GATEWAY_REVISION: ${{ github.sha }}

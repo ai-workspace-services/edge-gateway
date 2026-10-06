@@ -20,10 +20,12 @@ function jsonResponse(body: Record<string, unknown>, status: number): Response {
   });
 }
 
-function withRouteHeader(response: Response, route: string): Response {
+function withRouteHeader(response: Response, route: string, env: Env): Response {
   const headers = new Headers(response.headers);
   Object.entries(CORS_HEADERS).forEach(([key, value]) => headers.set(key, value));
   headers.set('X-Upstream-Route', route);
+  headers.set('X-Runtime-Mode', env.RUNTIME_MODE || 'hybrid');
+  if (env.GATEWAY_REVISION) headers.set('X-Gateway-Revision', env.GATEWAY_REVISION);
   return new Response(response.body, { status: response.status, headers });
 }
 
@@ -40,8 +42,8 @@ function requestInit(request: Request, headers: Headers, signal?: AbortSignal): 
   };
 
   if (request.method !== 'GET' && request.method !== 'HEAD') {
-    // Clone the original request for every attempt so a hybrid retry can
-    // forward the same POST/PUT/PATCH body after a primary failure.
+    // Each selected upstream receives its own request stream. Mutating
+    // requests are never replayed across databases.
     init.body = request.clone().body;
   }
 
@@ -58,7 +60,8 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
     async fetch(request: Request, env: Env): Promise<Response> {
       const url = new URL(request.url);
       const isBillingCustomDomain =
-        boundary === 'core' && Boolean(env.BILLING_HOST) && url.hostname === env.BILLING_HOST;
+        boundary === 'core' && [env.BILLING_HOST, ...(env.BILLING_ALIASES || '').split(',')]
+          .some((host) => Boolean(host?.trim()) && url.hostname === host?.trim());
 
       if (!isBillingCustomDomain && !ownsPath(url.pathname, boundary)) {
         return jsonResponse({ code: 404, error: `Unknown API boundary: ${boundary}` }, 404);
@@ -121,17 +124,10 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
       proxyHeaders.set('X-Forwarded-Proto', url.protocol.replace(':', ''));
       proxyHeaders.set('X-Edge-Boundary', boundary);
 
-      if (isBillingCustomDomain) {
-        if (!env.BILLING_UPSTREAM) {
-          return jsonResponse({ code: 500, error: 'Billing upstream is not configured' }, 500);
-        }
-        const billingUrl = new URL(url.pathname + url.search, env.BILLING_UPSTREAM);
-        const billingResponse = await fetch(billingUrl, requestInit(request, proxyHeaders));
-        return withRouteHeader(billingResponse, 'cloud-run-billing');
-      }
-
-      const primaryBase = env.PRIMARY_UPSTREAM;
-      const fallbackBase = env.FALLBACK_UPSTREAM;
+      const primaryBase = isBillingCustomDomain ? env.BILLING_PRIMARY_UPSTREAM : env.PRIMARY_UPSTREAM;
+      const fallbackBase = isBillingCustomDomain
+        ? env.BILLING_FALLBACK_UPSTREAM || env.BILLING_UPSTREAM
+        : env.FALLBACK_UPSTREAM;
       const runtimeMode = env.RUNTIME_MODE || 'hybrid';
       if (!['selfhost', 'serverless', 'hybrid'].includes(runtimeMode)) {
         return jsonResponse({ code: 500, error: `Unsupported runtime mode: ${runtimeMode}` }, 500);
@@ -143,9 +139,9 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
         return jsonResponse({ code: 500, error: 'Fallback upstream is not configured' }, 500);
       }
 
-      const backendService = backendServiceForPath(url.pathname);
+      const backendService = isBillingCustomDomain ? 'billing' : backendServiceForPath(url.pathname);
       const contentBase = env.CONTENT_UPSTREAM || env.CMS_UPSTREAM;
-      const billingBase = env.BILLING_UPSTREAM;
+      const billingBase = env.BILLING_FALLBACK_UPSTREAM || env.BILLING_UPSTREAM;
       const serviceFallbackBase =
         backendService === 'content'
           ? contentBase || fallbackBase
@@ -178,17 +174,19 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
 
       if (runtimeMode === 'serverless') {
         const serverlessResponse = await fetch(fallbackUrl!, requestInit(request, proxyHeaders));
-        return withRouteHeader(serverlessResponse, 'cloud-run-serverless');
+        return withRouteHeader(serverlessResponse, isBillingCustomDomain ? 'cloud-run-billing' : 'cloud-run-serverless', env);
       }
 
       if (runtimeMode === 'selfhost') {
         const vpsResponse = await fetch(primaryUrl!, requestInit(request, proxyHeaders));
-        return withRouteHeader(vpsResponse, 'selfhost-primary');
+        return withRouteHeader(vpsResponse, 'selfhost-primary', env);
       }
 
-      const mayFailOver = failoverMethodsFromEnv(env.FAILOVER_METHODS).includes(
-        request.method.toUpperCase(),
-      );
+      // One-way Supabase -> Selfhost copying cannot keep the old database
+      // current after new Selfhost writes. PROD deployment therefore disables
+      // Accounts/Billing read fallback until a live replica contract exists.
+      const mayFailOver = (backendService === 'content' || env.BUSINESS_READ_FAILOVER !== 'disabled') &&
+        failoverMethodsFromEnv(env.FAILOVER_METHODS).includes(request.method.toUpperCase());
 
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -197,15 +195,17 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
         const primaryResponse = await fetch(primaryUrl!, requestInit(request, proxyHeaders, controller.signal));
 
         if (primaryResponse.status < 500) {
-          return withRouteHeader(primaryResponse, 'selfhost-primary');
+          return withRouteHeader(primaryResponse, 'selfhost-primary', env);
         }
         if (!mayFailOver) {
-          return withRouteHeader(primaryResponse, 'selfhost-primary');
+          return withRouteHeader(primaryResponse, 'selfhost-primary', env);
         }
+        // Release the unused primary response before trying a read fallback.
+        await primaryResponse.body?.cancel();
         throw new Error(`VPS upstream returned status ${primaryResponse.status}`);
       } catch (error) {
         if (!mayFailOver) {
-          console.warn(`[Failover:${boundary}] Primary upstream failed for unsafe method ${request.method}; not retried`, error);
+          console.warn(`[Failover:${boundary}] Primary upstream failed and fallback is disabled for ${request.method}; not retried`, error);
           return jsonResponse(
             { code: 502, error: `Primary upstream unavailable and ${request.method} may not fail over` },
             502,
@@ -213,7 +213,7 @@ export function createGatewayWorker(boundary: GatewayBoundary) {
         }
         console.warn(`[Failover:${boundary}] Primary upstream failed`, error);
         const fallbackResponse = await fetch(fallbackUrl!, requestInit(request, proxyHeaders));
-        return withRouteHeader(fallbackResponse, 'cloud-run-fallback');
+        return withRouteHeader(fallbackResponse, 'cloud-run-fallback', env);
       } finally {
         if (timeoutId) clearTimeout(timeoutId);
       }

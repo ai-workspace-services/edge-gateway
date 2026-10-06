@@ -11,13 +11,18 @@ export interface Env {
   CONTENT_UPSTREAM?: string;
   CMS_UPSTREAM?: string;
   BILLING_HOST?: string;
+  BILLING_ALIASES?: string;
   BILLING_UPSTREAM?: string;
+  BILLING_PRIMARY_UPSTREAM?: string;
+  BILLING_FALLBACK_UPSTREAM?: string;
+  GATEWAY_REVISION?: string;
   CONTENT_SERVICE_TOKEN?: string;
   INTERNAL_SERVICE_TOKEN?: string;
   JWT_ISSUER?: string;
   JWT_SECRET?: string;
   TIMEOUT_MS?: string;
   FAILOVER_METHODS?: string;
+  BUSINESS_READ_FAILOVER?: 'enabled' | 'disabled';
 }
 
 // Hybrid failover crosses a database boundary: the selfhost primary writes to
