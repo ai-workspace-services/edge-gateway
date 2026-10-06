@@ -36,7 +36,8 @@ class AuthorizationTests(unittest.TestCase):
         receipt.update(changes)
         (self.root / 'edge-gateway-live-authorization.json').write_text(json.dumps(receipt))
 
-    def test_legacy_contract_is_unchanged(self):
+    def test_uat_contract_is_unchanged(self):
+        self.config['metadata']['environment'] = 'uat'
         self.config['spec']['runtime']['routing']['dns'] = {}
         self.plan.write_text(json.dumps(self.config))
         self.assertEqual(self.guard().returncode, 0)
@@ -49,6 +50,11 @@ class AuthorizationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('guarded Edge Gateway dispatch', result.stderr)
             self.assertNotIn('[Vault]', result.stdout)
+
+    def test_legacy_production_declaration_also_requires_authorization(self):
+        self.config['spec']['runtime']['routing']['dns'] = {}
+        self.plan.write_text(json.dumps(self.config))
+        self.assertNotEqual(self.guard().returncode, 0)
 
     def test_same_run_fresh_authorization_accepts_only_the_same_plan(self):
         self.authorize(); self.assertEqual(self.guard().returncode, 0)

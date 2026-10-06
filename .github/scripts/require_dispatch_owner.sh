@@ -2,14 +2,13 @@
 set -euo pipefail
 : "${EDGE_GATEWAY_CONFIG_FILE:?rendered config required}"
 
-# Legacy orchestrators may deploy older contracts. The explicit PROD GTM
-# contract has exactly one mutation entry, after its live writer check.
+# PROD has exactly one mutation entry, after its live writer check. This also
+# stops a legacy controller with an older declaration overwriting the writer.
 python3 - <<'PY'
 import hashlib, json, os, pathlib, time
 path = pathlib.Path(os.environ['EDGE_GATEWAY_CONFIG_FILE'])
 config = json.loads(path.read_text())
-guarded = (config['metadata'].get('environment') == 'prod' and
-    config['spec']['runtime'].get('routing', {}).get('dns', {}).get('api_alias_mode') == 'worker-routes-cname')
+guarded = config['metadata'].get('environment') == 'prod'
 if not guarded: raise SystemExit(0)
 def require(value):
     if not value: raise SystemExit('PROD GTM publication requires the guarded Edge Gateway dispatch and live writer authorization')
