@@ -44,3 +44,19 @@ path.write_text(json.dumps(config, indent=2) + '\n')
 print('Current writer checked; full business receipt required=' + str(changed).lower())
 PY
 bash .github/scripts/verify_cutover.sh
+
+# Local, plan-bound authorization is created only after both live inspection
+# and the required full-business receipt check. Do not upload this receipt.
+python3 - <<'PY'
+import hashlib, json, os, pathlib, time
+path = pathlib.Path(os.environ['EDGE_GATEWAY_CONFIG_FILE'])
+root = os.environ.get('RUNNER_TEMP')
+if not root: raise SystemExit('Runner authorization directory required')
+receipt = {'plan_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+    'revision': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'],
+    'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'verified_at': time.time()}
+output = pathlib.Path(root) / 'edge-gateway-live-authorization.json'
+with output.open('x') as handle:
+    os.chmod(output, 0o600)
+    json.dump(receipt, handle)
+PY

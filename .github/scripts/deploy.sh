@@ -12,6 +12,7 @@ CONFIG_FILE="${EDGE_GATEWAY_CONFIG_FILE:?EDGE_GATEWAY_CONFIG_FILE must point to 
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 test -f "${CONFIG_FILE}" || { echo "edge-gateway config not found: ${CONFIG_FILE}" >&2; exit 2; }
+bash "$(dirname "${BASH_SOURCE[0]}")/require_dispatch_owner.sh"
 
 RUNTIME_MODE="$(jq -er '.spec.runtime.mode' "${CONFIG_FILE}")"
 jq -e --arg mode "${RUNTIME_MODE}" \

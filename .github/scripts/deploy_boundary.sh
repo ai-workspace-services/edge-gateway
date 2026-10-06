@@ -12,6 +12,7 @@ esac
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 2; }
 test -f "${CONFIG_FILE}" || { echo "edge-gateway config not found: ${CONFIG_FILE}" >&2; exit 2; }
+bash "$(dirname "${BASH_SOURCE[0]}")/require_dispatch_owner.sh"
 
 jq -e '.kind == "EdgeRoutingConfig" and .metadata.mode == .spec.runtime.mode and (.spec.runtime.mode == "selfhost" or .spec.runtime.mode == "serverless" or .spec.runtime.mode == "hybrid")' "${CONFIG_FILE}" >/dev/null || {
   echo "GitOps routing manifest must be a valid mode-specific EdgeRoutingConfig" >&2
