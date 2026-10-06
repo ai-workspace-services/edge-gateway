@@ -151,6 +151,8 @@ npm run typecheck
 身份域单独导入或只有来源侧摘要不会放行。审批后再次检查回执时效。
 当前回执生产器尚未注册，改变数据库写入入口会被拒绝；不改变上游的 Serverless 部署可验证路由。
 发布前还读取实际 Worker 绑定；从 Selfhost 返回 Serverless 同样需要完整业务回执。
+显式 PROD GTM 契约只允许本仓库受保护的手动发布入口修改 Worker；部署脚本要求同一 run、
+同一 commit、同一路由计划的限时 live writer 授权。旧 Serverless/Hybrid 调用不能绕过门槛覆盖生产路由。
 单向 Supabase → Selfhost 复制不能持续保证旧库跟随 Selfhost 新写入，PROD 的 Accounts/Billing
 读回退默认禁用；注册并验收持续副本合同后才能启用。UAT 和独立 Content 读回退保留安全方法限制。
 
