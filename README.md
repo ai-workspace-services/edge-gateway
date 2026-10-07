@@ -144,12 +144,14 @@ npm run typecheck
 | `billing_primary_upstream`, `billing_fallback_upstream` | Billing 两个独立 HTTPS origin |
 | `timeout_ms` | 默认 2500；覆盖范围 100–10000 |
 | `gitops_ref` | 已审查 GitOps commit SHA；Worker 名称、入口和路由取自声明 |
-| `cutover_run_id` | 改变数据库写入入口时必须提供完整业务核对回执 |
+| `cutover_run_id` | 改变数据库写入入口时必须提供核心用户核对、来源停写和单写者回执 |
 
-切换回执由 Toolkit 成功的数据操作流水线产生，绑定环境、准确上游、52 个业务表行数和
-按 email 对齐的摘要、用户数量、PROD Proxy UUID、最新原生 schema 及单写者隔离窗口。
-身份域单独导入或只有来源侧摘要不会放行。审批后再次检查回执时效。
-当前回执生产器尚未注册，改变数据库写入入口会被拒绝；不改变上游的 Serverless 部署可验证路由。
+切换回执由 Toolkit 的数据控制面关联 owner 回执，绑定环境、准确上游、来源最新 email
+集合的数量、email/password-hash/Proxy UUID 三类摘要、最新原生 schema 及单写者隔离窗口。
+动态业务表仍由数据 owner 保留表级证据，但不进入 Edge 的放行字段；身份域单独导入或只有
+来源侧摘要不会放行。审批后再次检查回执时效。
+`core_users` 基线同步只发布脱敏摘要，不能代替来源停写、最终追平和单写者证明；在最终
+`gtm-cutover` 回执注册前，任何改变数据库写入入口的部署都会被拒绝。
 发布前还读取实际 Worker 绑定；从 Selfhost 返回 Serverless 同样需要完整业务回执。
 PROD 只允许本仓库受保护的手动发布入口修改 Worker；部署脚本要求同一 run、
 同一 commit、同一路由计划的限时 live writer 授权。旧 Serverless/Hybrid 调用不能绕过门槛覆盖生产路由。
