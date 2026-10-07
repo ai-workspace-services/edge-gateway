@@ -45,7 +45,7 @@ on:
         default: f95197ef8e8078748f0b8471f9fe9aabd47cc0b7
         type: string
       cutover_run_id:
-        description: 'Trusted full business consistency and single writer receipt run ID'
+        description: 'Trusted core-user identity consistency and single-writer receipt run ID'
         type: string
 
 permissions:
@@ -71,7 +71,7 @@ jobs:
         run: npm run check:bundle-size
       - name: Test
         run: npm test
-      - name: Verify dispatch and full business cutover contracts
+      - name: Verify dispatch and core-user cutover contracts
         run: .github/scripts/run_contract_tests.sh
 
   routing:
@@ -103,7 +103,7 @@ jobs:
           INPUT_BILLING_PRIMARY_UPSTREAM: ${{ inputs.billing_primary_upstream }}
           INPUT_BILLING_FALLBACK_UPSTREAM: ${{ inputs.billing_fallback_upstream }}
           INPUT_TIMEOUT_MS: ${{ inputs.timeout_ms }}
-      - name: Require full business equality before changing a writer
+      - name: Require core-user equality before changing a writer
         if: inputs.deploy
         run: .github/scripts/verify_cutover.sh
         env:

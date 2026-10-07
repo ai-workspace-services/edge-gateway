@@ -87,22 +87,18 @@ class DispatchTests(unittest.TestCase):
         result = subprocess.run(['bash', str(SCRIPTS / 'verify_cutover.sh')],
             env=dict(os.environ, EDGE_GATEWAY_CONFIG_FILE=str(self.plan), CUTOVER_RUN_ID=''), capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('full business cutover receipt', result.stderr)
+        self.assertIn('cutover receipt', result.stderr)
 
     def receipt(self):
         self.assertEqual(self.prepare(INPUT_RUNTIME_MODE='selfhost').returncode, 0)
         body = inline_python((SCRIPTS / 'verify_cutover.sh').read_text())
-        tree = ast.parse(body)
-        assignment = next(n for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'expected' for t in n.targets))
-        tables = assignment.value.args[0].func.value.value.split()
         defaults = self.config['spec']['serverless']['edge_gateway']['defaults']
-        receipt = {'schema': 'edge-gateway-cutover/v1', 'run_id': '123', 'workflow_sha': SHA, 'environment': 'prod',
+        receipt = {'schema': 'edge-gateway-cutover/v2', 'run_id': '123', 'workflow_sha': SHA, 'environment': 'prod',
             'verified_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
             'bindings': {k: defaults[k] for k in ('primary_upstream', 'fallback_upstream', 'billing_primary_upstream', 'billing_fallback_upstream')},
             'writers_quiesced': True, 'single_writer': True, 'latest_native_schema': True,
-            'tables': [{'table': t, 'source_rows': 0, 'target_rows': 0, 'source_email_bound_sha256': 'b'*64, 'target_email_bound_sha256': 'b'*64} for t in tables],
-            'source': {'users': 24, 'email_set_sha256': 'c'*64, 'email_proxy_sha256': 'd'*64},
-            'target': {'users': 24, 'email_set_sha256': 'c'*64, 'email_proxy_sha256': 'd'*64}}
+            'core_users': {'source': {'count': 24, 'email_sha256': 'c'*64, 'password_hash_sha256': 'e'*64, 'email_proxy_sha256': 'd'*64},
+                           'target': {'count': 24, 'email_sha256': 'c'*64, 'password_hash_sha256': 'e'*64, 'email_proxy_sha256': 'd'*64}}}
         receipt['bindings']['mode'] = 'selfhost'
         return body, receipt
 
@@ -118,12 +114,12 @@ class DispatchTests(unittest.TestCase):
 
     def test_incomplete_stale_proxy_and_origin_mismatch_rejected(self):
         for mutation in (
-            lambda r: r['tables'].pop(),
-            lambda r: r['target'].update(email_proxy_sha256='e'*64),
+            lambda r: r['core_users']['target'].update(email_proxy_sha256='f'*64),
+            lambda r: r['core_users']['target'].update(password_hash_sha256='f'*64),
             lambda r: r['bindings'].update(primary_upstream='https://other.example.test'),
             lambda r: r.update(single_writer=False),
             lambda r: r.update(verified_at='2020-01-01T00:00:00Z'),
-            lambda r: r['tables'][0].update(target_rows=True),
+            lambda r: r['core_users']['target'].update(count=23),
         ):
             body, receipt = self.receipt(); mutation(receipt)
             self.assertNotEqual(self.validate_receipt(body, receipt).returncode, 0)

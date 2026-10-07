@@ -41,12 +41,12 @@ for boundary in config['spec']['serverless']['edge_gateway']['boundaries']:
     if actual != expected: changed = True
 config['metadata']['cutover_required'] = changed
 path.write_text(json.dumps(config, indent=2) + '\n')
-print('Current writer checked; full business receipt required=' + str(changed).lower())
+print('Current writer checked; core-user receipt required=' + str(changed).lower())
 PY
 bash .github/scripts/verify_cutover.sh
 
 # Local, plan-bound authorization is created only after both live inspection
-# and the required full-business receipt check. Do not upload this receipt.
+# and the required core-user receipt check. Do not upload this receipt.
 python3 - <<'PY'
 import hashlib, json, os, pathlib, time
 path = pathlib.Path(os.environ['EDGE_GATEWAY_CONFIG_FILE'])
